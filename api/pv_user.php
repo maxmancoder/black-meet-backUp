@@ -35,4 +35,7 @@ $u = find_user_by_identifier($pdo, $identifier);
 if (!$u) json_out(['ok' => false, 'msg' => 'کاربری با این مشخصات یافت نشد']);
 $pdo->prepare('INSERT INTO pv_messages (user_id, from_manager, body) VALUES (?, 0, ?)')->execute([$u['id'], $body]);
 $pdo->prepare('UPDATE users SET last_activity = NOW() WHERE id=?')->execute([$u['id']]);
+// realtime push to manager console(s) via unified channel
+require_once __DIR__ . '/../security.php';
+broadcast_to_node('', 'pv:conversation-updated', ['userId' => (int)$u['id'], 'lastBody' => $body, 'ts' => date('Y-m-d H:i:s')]);
 json_out(['ok' => true]);

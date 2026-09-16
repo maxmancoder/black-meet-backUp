@@ -2,7 +2,6 @@
 $title = 'تماس - Black Meet';
 require_once __DIR__ . '/auth.php';
 require_login();
-require_once __DIR__ . '/partials/head.php';
 
 $room = trim($_GET['room'] ?? '');
 if ($room === '') { header('Location: ' . base_url() . '/home.php'); exit; }
@@ -23,6 +22,9 @@ if ($stmt->fetchColumn()) {
     header('Location: ' . base_url() . '/home.php?err=blocked');
     exit;
 }
+
+// head.php outputs HTML → include only AFTER all possible header() redirects
+require_once __DIR__ . '/partials/head.php';
 
 // ensure participant row
 $stmt = $pdo->prepare('SELECT * FROM meeting_participants WHERE meeting_id=? AND user_id=?');
@@ -215,7 +217,7 @@ $initials = initials($me['display_name']);
     <span class="material-symbols-outlined">error</span><span id="toast-message"></span></div></div>
 
 <script src="<?= e($init['socketUrl']) ?>/socket.io/socket.io.js"></script>
-<script>window.INIT = <?= json_encode($init, JSON_UNESCAPED_UNICODE) ?>;</script>
+<script>window.INIT = <?= json_encode($init, JSON_UNESCAPED_UNICODE) ?>; window.__BM_isManager = <?= json_encode(!empty($me['is_manager'])) ?>;</script>
 <script>
   // Sidebar open/close: one button toggles chat/members/admin on ALL screen sizes.
   window.toggleSidebar = function (force) {
@@ -238,6 +240,6 @@ $initials = initials($me['display_name']);
     toggleSidebar(window.innerWidth >= 768);
   });
 </script>
-<script src="<?= base_url() ?>/assets/js/call.js"></script>
+<script src="<?= asset_url('assets/js/call.js') ?>"></script>
 </body>
 </html>

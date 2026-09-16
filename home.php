@@ -10,13 +10,6 @@ $me = current_user();
 $limited = !empty($me['is_limited']);
 $pdo = db_connect();
 
-// Cleanup: when the user actually enters the main page, delete any
-// pending verification codes for their phone from the DB.
-if (!empty($me['phone'])) {
-    $pdo->prepare('DELETE FROM verification_codes WHERE identifier=?')
-        ->execute([$me['phone']]);
-}
-
 // recent meetings created by user
 $stmt = $pdo->prepare('SELECT m.id, m.room_id, m.title, m.created_at, m.active,
                        (SELECT COUNT(*) FROM meeting_participants p WHERE p.meeting_id=m.id AND p.status<>"removed") AS members
@@ -182,6 +175,6 @@ $csrf = csrf_token();
     <span class="material-symbols-outlined">error</span><span id="toast-message"></span></div></div>
 
 <script>window.CSRF = <?= json_encode($csrf) ?>; window.BASE = <?= json_encode(base_url()) ?>; window.__isManager = <?= json_encode(!empty($me['is_manager'])) ?>;</script>
-<script src="<?= base_url() ?>/assets/js/home.js"></script>
+<script src="<?= asset_url('assets/js/home.js') ?>"></script>
 </body>
 </html>

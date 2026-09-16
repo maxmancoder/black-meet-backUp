@@ -61,5 +61,6 @@ tailwind.config = {
 </script>
 <script>window.__BM_SKIP_BUTTON_LOADER = (window.__BM_SKIP_BUTTON_LOADER || []);window.__BM_LIVE_URL = '<?= e(socket_url()) ?>';<?php if (basename($_SERVER['SCRIPT_NAME'] ?? '') === 'call.php'): ?>window.__BM_SKIP_BUTTON_LOADER.push('call');<?php endif; ?></script>
 <script src="<?= e(socket_url()) ?>/socket.io/socket.io.js"></script>
-<script src="<?= base_url() ?>/assets/js/live.js"></script>
+<script src="<?= asset_url('shared/socket-events.js') ?>"></script>
+<script src="<?= asset_url('assets/js/live.js') ?>"></script>
 <script src="<?= base_url() ?>/assets/js/interactions.js"></script>

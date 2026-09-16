@@ -1,12 +1,12 @@
 <?php
 $title = 'ورود / ثبت‌نام - Black Meet';
 require_once __DIR__ . '/auth.php';
-require_once __DIR__ . '/partials/head.php';
 
 if (current_user() !== null) {
     header('Location: ' . base_url() . '/home.php');
     exit;
 }
+require_once __DIR__ . '/partials/head.php';
 $csrf = csrf_token();
 ?>
 </head>

@@ -1,6 +1,11 @@
-// assets/js/call.js
+// assets/js/call.js — Phase 1: realtime call page
+// - handshake-authenticated socket, single `call:join` path
+// - perfect negotiation (polite/impolite) + ICE restart recovery
+// - incremental member events (member:joined/left/updated/...)
+// - admin actions via one socket path (server → PHP → DB → broadcast)
 (function () {
   const I = window.INIT;
+  const EV = window.BMEv;
   const ICE = (I && I.iceServers && I.iceServers.length) ? I.iceServers : [
     { urls: 'stun:stun.l.google.com:19302' },
     { urls: 'stun:stun1.l.google.com:19302' }
@@ -12,16 +17,19 @@
   let cameraTrack = null;
   let screenTrack = null;
   let currentVideoTrack = null;
-  let micOn = false, camOn = false, sharing = false, approved = (I.me.status === 'approved');
-  const pcMap = new Map();        // userId -> RTCPeerConnection
-  const peerMeta = new Map();     // userId -> {name, avatar_color}
+  let micOn = false, camOn = false, sharing = false;
+  let approved = (I.me.status === 'approved');
+
+  const pcMap = new Map();        // userId -> { pc, polite, makingOffer, ignoreOffer, srdAnswerPending }
+  const peerMeta = new Map();     // userId -> {name, avatar_color, avatar}
   const memberStatus = new Map(); // userId -> {muted,cam,sharing}
   const memberNames = new Map();  // userId -> display name
-  const localBlock = {};           // userId -> {audio,video,screen}  (admin local-only blocks)
-  const localAudio = {};           // userId -> {muted, volume}       (per-user local audio)
+  const localBlock = {};          // userId -> {audio,video,screen} (per-viewer local blocks)
+  const localAudio = {};          // userId -> {muted, volume}
   const remoteStreams = new Map();
   let menuUserId = null;
   let currentList = [];
+  let joinedRoom = false;
 
   const $ = id => document.getElementById(id);
   const grid = $('video-grid');
@@ -33,7 +41,6 @@
   }
   window.showToast = showToast;
 
-  // Short notification beep via WebAudio
   function playBeep() {
     try {
       const Ctx = window.AudioContext || window.webkitAudioContext;
@@ -49,17 +56,13 @@
   }
 
   window.alertAdmin = function () {
-    socket && socket.emit('alert-admin');
+    if (socket) socket.emit(EV.CALL_ALERT_ADMIN);
     playBeep();
     showToast('درخواست ورود به ادمین ارسال شد');
   };
 
   window.adminBlock = function (userId) {
-    socket && socket.emit('admin-block', { userId });
-    fetch('api/admin_block.php', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csrf: I.csrf, meeting_id: I.meeting.id, user_id: String(userId) })
-    }).catch(() => {});
+    if (socket) socket.emit(EV.CALL_BLOCK, { userId });
     showToast('کاربر از این تماس مسدود شد');
   };
 
@@ -74,8 +77,7 @@
         currentVideoTrack = cameraTrack;
         updateSelfVideo();
         updateControlUI();
-        // add tracks to existing pcs
-        pcMap.forEach(pc => addLocalTracks(pc));
+        pcMap.forEach(({ pc }) => addLocalTracks(pc));
       })
       .catch(() => { renderSelf(); updateControlUI(); });
   }
@@ -83,7 +85,6 @@
   function addLocalTracks(pc) {
     if (!localStream) return;
     localStream.getTracks().forEach(t => {
-      // avoid duplicates
       const exists = pc.getSenders().some(s => s.track && s.track.kind === t.kind);
       if (!exists) pc.addTrack(t, localStream);
     });
@@ -121,13 +122,18 @@
     return I.base + '/' + a.replace(/^\/+/, '');
   }
 
-  function avatarMarkup(meta, sizeCls) {
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  }
+
+  function avatarMarkup(meta) {
     meta = meta || {};
     const init = initials(meta.name || '؟');
+    const color = /^#[0-9a-fA-F]{3,8}$/.test(meta.avatar_color || '') ? meta.avatar_color : '#4f46e5';
     if (meta.avatar) {
       return '<img src="' + escapeHtml(avatarUrl(meta.avatar)) + '" class="w-full h-full object-cover" alt=""/>';
     }
-    return '<div class="w-full h-full flex items-center justify-center font-display-md text-white" style="background:' + (meta.avatar_color || '#4f46e5') + '">' + escapeHtml(init) + '</div>';
+    return '<div class="w-full h-full flex items-center justify-center font-display-md text-white" style="background:' + color + '">' + escapeHtml(init) + '</div>';
   }
 
   function renderSelf() {
@@ -138,7 +144,7 @@
     tile.innerHTML = `
       <video id="self-video" autoplay muted playsinline class="w-full h-full object-cover"></video>
       <div id="self-avatar" class="hidden absolute inset-0 flex items-center justify-center">
-        <div class="w-24 h-24 rounded-full flex items-center justify-center font-display-md text-white" style="background:${I.me.avatar_color}">${initials(I.me.name)}</div>
+        <div class="w-24 h-24 rounded-full flex items-center justify-center font-display-md text-white" style="background:${escapeHtml(I.me.avatar_color)}">${escapeHtml(initials(I.me.name))}</div>
       </div>
       <div class="absolute bottom-3 right-3 bg-background/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2">
         <span class="font-label-md text-on-surface">${escapeHtml(I.me.name)} (شما)</span>
@@ -156,15 +162,15 @@
     tile.innerHTML = `
       <video id="vid-${userId}" autoplay playsinline class="w-full h-full object-cover"></video>
       <div id="av-${userId}" class="hidden absolute inset-0 flex items-center justify-center">
-        ${avatarMarkup(meta, 'w-24 h-24')}
+        ${avatarMarkup(meta)}
       </div>
       <div class="absolute top-3 right-3 bg-surface-container-highest/80 backdrop-blur-md px-2 py-1 rounded-md border border-white/10">
         <span id="mic-${userId}" class="material-symbols-outlined text-[14px] text-secondary">mic</span>
       </div>
       <div class="absolute bottom-3 right-3 bg-background/80 backdrop-blur-md px-3 py-1.5 rounded-lg border border-white/10 flex items-center gap-2">
-        <span class="font-label-md text-on-surface" id="name-${userId}">${escapeHtml(meta.name || '')}</span>
+        <span class="font-label-md text-on-surface" id="name-${userId}">${escapeHtml((meta && meta.name) || '')}</span>
       </div>`;
-    tile.oncontextmenu = (e) => openMemberMenu(e, userId, meta.name);
+    tile.oncontextmenu = (e) => openMemberMenu(e, userId, meta && meta.name);
     grid.appendChild(tile);
     applyMediaOverrides(userId);
     updateTileName(userId);
@@ -177,21 +183,27 @@
     remoteStreams.delete(userId);
   }
 
-  function escapeHtml(s) {
-    return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-  }
-
-  // ---------- WebRTC ----------
+  // ---------- WebRTC: perfect negotiation ----------
   function createPC(peer, initiator) {
     if (pcMap.has(peer.userId)) return pcMap.get(peer.userId);
     peerMeta.set(peer.userId, { name: peer.name, avatar_color: peer.avatar_color, avatar: peer.avatar || '' });
-    const pc = new RTCPeerConnection({ iceServers: ICE, iceCandidatePoolSize: 4 });
-    pcMap.set(peer.userId, pc);
     getOrCreateTile(peer.userId, peer);
+
+    // deterministic politeness: the peer with the larger userId is impolite
+    const polite = I.me.id < peer.userId;
+    const st = {
+      pc: new RTCPeerConnection({ iceServers: ICE, iceCandidatePoolSize: 4 }),
+      polite,
+      makingOffer: false,
+      ignoreOffer: false,
+      srdAnswerPending: false,
+    };
+    const pc = st.pc;
+    pcMap.set(peer.userId, st);
     addLocalTracks(pc);
 
     pc.onicecandidate = e => {
-      if (e.candidate) socket.emit('signal', { to: peer.userId, data: { type: 'ice', candidate: e.candidate } });
+      if (e.candidate && socket) socket.emit(EV.CALL_SIGNAL, { to: peer.userId, data: { type: 'ice', candidate: e.candidate } });
     };
     pc.ontrack = e => {
       let rs = remoteStreams.get(peer.userId);
@@ -201,24 +213,84 @@
       if (v) v.srcObject = rs;
       applyMediaOverrides(peer.userId);
     };
+    pc.onnegotiationneeded = async () => {
+      if (!socket) return;
+      try {
+        st.makingOffer = true;
+        await pc.setLocalDescription();
+        socket.emit(EV.CALL_SIGNAL, { to: peer.userId, data: { type: 'desc', sdp: pc.localDescription } });
+      } catch (e) {
+      } finally {
+        st.makingOffer = false;
+      }
+    };
+    pc.oniceconnectionstatechange = () => {
+      if (pc.iceConnectionState === 'failed') {
+        // ICE restart — no page refresh needed for routine recovery
+        try { pc.restartIce(); } catch (e) {}
+      }
+    };
     pc.onconnectionstatechange = () => {
-      if (['failed', 'closed', 'disconnected'].includes(pc.connectionState) && pc.connectionState !== 'connected') {
-        // leave cleanup to peer-left
+      if (pc.connectionState === 'failed') {
+        try { pc.restartIce(); } catch (e) {}
       }
     };
 
-    if (initiator) {
-      pc.createOffer().then(offer => {
-        return pc.setLocalDescription(offer).then(() =>
-          socket.emit('signal', { to: peer.userId, data: pc.localDescription }));
-      }).catch(() => {});
+    if (initiator && socket && socket.connected) {
+      // explicit initial offer from the deterministic initiator
+      try {
+        st.makingOffer = true;
+        pc.createOffer().then(async (offer) => {
+          await pc.setLocalDescription(offer);
+          socket.emit(EV.CALL_SIGNAL, { to: peer.userId, data: { type: 'desc', sdp: pc.localDescription } });
+        }).finally(() => { st.makingOffer = false; });
+      } catch (e) { st.makingOffer = false; }
     }
-    return pc;
+    return st;
+  }
+
+  async function handleSignal(from, data) {
+    if (from === I.me.id) return;
+    let st = pcMap.get(from);
+    if (!st) {
+      const meta = peerMeta.get(from) || { name: memberNames.get(from) || '', avatar_color: '#4f46e5', avatar: '' };
+      st = createPC({ userId: from, ...meta }, false);
+      updateTileName(from);
+    }
+    const pc = st.pc;
+    try {
+      if (data.type === 'desc') {
+        const offerCollision = data.sdp.type === 'offer' && (st.makingOffer || pc.signalingState !== 'stable');
+        st.ignoreOffer = !st.polite && offerCollision;
+        if (st.ignoreOffer) return;
+        if (offerCollision) {
+          const rollback = Promise.resolve(pc.setLocalDescription({ type: 'rollback' }));
+          await rollback;
+        }
+        await pc.setRemoteDescription(data.sdp);
+        st.srdAnswerPending = false;
+        if (data.sdp.type === 'offer') {
+          await pc.setLocalDescription();
+          socket.emit(EV.CALL_SIGNAL, { to: from, data: { type: 'desc', sdp: pc.localDescription } });
+        }
+      } else if (data.type === 'ice') {
+        try {
+          await pc.addIceCandidate(data.candidate);
+        } catch (err) {
+          if (!st.ignoreOffer) throw err;
+        }
+      }
+    } catch (e) { /* recoverable: ICE restart will kick in on failure states */ }
+  }
+
+  function destroyPC(userId) {
+    const st = pcMap.get(userId);
+    if (st) { try { st.pc.close(); } catch (e) {} pcMap.delete(userId); }
   }
 
   function replaceOutgoingVideo(track) {
     currentVideoTrack = track;
-    pcMap.forEach(pc => {
+    pcMap.forEach(({ pc }) => {
       const sender = pc.getSenders().find(s => s.track && s.track.kind === 'video');
       if (sender) sender.replaceTrack(track).catch(() => {});
     });
@@ -226,92 +298,155 @@
   }
 
   // ---------- Socket ----------
-  let joined = false, mediaReady = false, pendingJoin = false;
   function broadcastStatus() {
-    if (socket) socket.emit('member-status', { muted: !micOn, cam: camOn, sharing });
+    if (socket) socket.emit(EV.CALL_STATUS, { muted: !micOn, cam: camOn, sharing });
   }
-  function doJoin() {
-    if (joined || !socket || !socket.connected || !mediaReady) { pendingJoin = true; return; }
-    joined = true;
-    socket.emit('join', {
-      room: I.meeting.room, token: I.token,
-      user: { id: I.me.id, name: I.me.name, username: I.me.username, avatar_color: I.me.avatar_color, avatar: I.me.avatar || '', is_admin: I.me.is_admin, status: I.me.status }
+
+  function doJoin(cb) {
+    if (!socket || !socket.connected || joinedRoom) { if (typeof cb === 'function') cb({ ok: false }); return; }
+    joinedRoom = true;
+    socket.emit(EV.CALL_JOIN, {
+      room: I.meeting.room,
+      token: I.token,
+      user: {
+        id: I.me.id, name: I.me.name, username: I.me.username,
+        avatar_color: I.me.avatar_color, avatar: I.me.avatar || '',
+        is_admin: I.me.is_admin, is_manager: !!window.__BM_isManager, status: I.me.status
+      }
+    }, (resp) => {
+      if (resp && resp.ok) {
+        // apply authoritative bootstrap members
+        (resp.members || []).forEach(m => {
+          memberNames.set(m.userId, m.name);
+          peerMeta.set(m.userId, { name: m.name, avatar_color: m.avatar_color, avatar: m.avatar || '' });
+          memberStatus.set(m.userId, { muted: !!m.muted, cam: m.cam !== false, sharing: !!m.sharing });
+          if (m.status === 'approved') {
+            getOrCreateTile(m.userId, m);
+            createPC(m, I.me.id > m.userId);
+          }
+          renderOneMember(m);
+        });
+        currentList = (resp.members || []).slice();
+        renderPendingCards();
+      } else if (resp && resp.error === 'BLOCKED') {
+        showToast('شما از این تماس مسدود شده‌اید');
+        setTimeout(() => location.href = I.base + '/home.php?err=blocked', 1500);
+      } else if (resp && resp.error === 'MEETING_NOT_FOUND') {
+        showToast('این تماس دیگر فعال نیست');
+        setTimeout(() => location.href = I.base + '/home.php', 1500);
+      }
+      if (typeof cb === 'function') cb(resp || { ok: false });
     });
   }
-  function connect() {
+
+  function connectSocket() {
+    // call page uses the meeting token directly at handshake
     socket = io(I.socketUrl || undefined, {
-      transports: ['polling', 'websocket'],
+      auth: { token: I.token },
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
       timeout: 20000
     });
-    socket.on('connect', () => { 
-      if (mediaReady) doJoin(); 
-      updateConnectState();
+    window.BM_SOCKET = socket;
+
+    socket.on('connect', () => {
+      const el = $('conn-state'); if (el) { el.textContent = 'زنده'; el.className = 'w-2 h-2 rounded-full bg-secondary'; }
+      joinedRoom = false;
+      if (mediaReady) doJoin();
     });
-    socket.on('error-msg', d => showToast(d.msg || 'خطا'));
-    socket.on('approved', () => { approved = true; $('waiting-overlay').classList.add('hidden'); broadcastStatus(); });
-    socket.on('you-approved', () => { approved = true; $('waiting-overlay').classList.add('hidden'); broadcastStatus(); });
-    socket.on('room-peers', peers => {
-      peers.forEach(p => { if (p.userId !== I.me.id) createPC(p, I.me.id > p.userId); });
+    socket.on('disconnect', () => {
+      const el = $('conn-state'); if (el) { el.textContent = 'قطع'; el.className = 'w-2 h-2 rounded-full bg-error'; }
     });
-    socket.on('peer-joined', p => {
-      if (p.userId === I.me.id) return;
-      createPC(p, I.me.id > p.userId);
+    socket.on('reconnect_attempt', () => {
+      const el = $('conn-state'); if (el) { el.textContent = 'اتصال...'; el.className = 'w-2 h-2 rounded-full bg-warning'; }
     });
-    socket.on('signal', async ({ from, data }) => {
-      if (!pcMap.has(from)) {
-        const meta = peerMeta.get(from) || { name: memberNames.get(from) || '', avatar_color: '#4f46e5' };
-        createPC({ userId: from, ...meta }, false);
-        updateTileName(from);
-      }
-      const pc = pcMap.get(from);
-      try {
-        if (data.type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(data));
-          const ans = await pc.createAnswer();
-          await pc.setLocalDescription(ans);
-          socket.emit('signal', { to: from, data: pc.localDescription });
-        } else if (data.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(data));
-        } else if (data.type === 'ice') {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) {}
+    socket.on(EV.ERR, d => showToast(d.msg || d.error || 'خطا'));
+
+    socket.on(EV.YOU_APPROVED, () => {
+      approved = true;
+      $('waiting-overlay').classList.add('hidden');
+      broadcastStatus();
+    });
+    socket.on(EV.CALL_WELCOME, (d) => {
+      // authoritative initial room state
+      (d.members || []).forEach(m => {
+        memberNames.set(m.userId, m.name);
+        peerMeta.set(m.userId, { name: m.name, avatar_color: m.avatar_color, avatar: m.avatar || '' });
+        memberStatus.set(m.userId, { muted: !!m.muted, cam: m.cam !== false, sharing: !!m.sharing });
+        if (m.status === 'approved') {
+          getOrCreateTile(m.userId, m);
+          createPC(m, I.me.id > m.userId);
         }
-      } catch (e) {}
+        renderOneMember(m);
+      });
+      currentList = (d.members || []).slice();
+      renderPendingCards();
     });
-    socket.on('peer-left', ({ userId }) => {
-      const pc = pcMap.get(userId);
-      if (pc) { pc.close(); pcMap.delete(userId); }
+    socket.on(EV.MEMBER_JOINED, ({ member }) => {
+      memberNames.set(member.userId, member.name);
+      peerMeta.set(member.userId, { name: member.name, avatar_color: member.avatar_color, avatar: member.avatar || '' });
+      memberStatus.set(member.userId, { muted: !!member.muted, cam: member.cam !== false, sharing: !!member.sharing });
+      currentList = currentList.filter(m => m.userId !== member.userId).concat([member]);
+      renderOneMember(member);
+      renderPendingCards();
+    });
+    socket.on(EV.MEMBER_LEFT, ({ userId }) => {
+      currentList = currentList.filter(m => m.userId !== userId);
+      removeMemberRow(userId);
+      destroyPC(userId);
       removeTile(userId);
+      renderPendingCards();
       layoutGrid();
-      peerMeta.delete(userId);
     });
-    socket.on('member-list', list => renderMembers(list));
-    socket.on('join-request', p => {
-      memberNames.set(p.userId, p.name);
-      // Instantly surface the request card in the admin panel (no refresh)
-      if (I.me.is_admin && currentList.every(m => m.userId !== p.userId)) {
-        currentList = currentList.concat([p]);
-        renderMembers(currentList);
-      }
-      playBeep();
-      showToast('درخواست ورود از سمت ' + (p.name || 'یک کاربر'));
-    });
-    socket.on('connect', () => { const el = $('conn-state'); if (el) { el.textContent = 'زنده'; el.className = 'w-2 h-2 rounded-full bg-secondary'; } });
-    socket.on('disconnect', () => { const el = $('conn-state'); if (el) { el.textContent = 'قطع'; el.className = 'w-2 h-2 rounded-full bg-error'; } });
-    socket.on('chat', d => appendMessage(d.userId, memberNames.get(d.userId) || d.name || 'بدون نام', d.body, false));
-    socket.on('emoji', d => spawnEmoji(d.emoji));
-    socket.on('member-status', d => {
+    socket.on(EV.MEMBER_UPDATED, (d) => {
       const cur = memberStatus.get(d.userId) || {};
       if (d.muted !== undefined) cur.muted = d.muted;
       if (d.cam !== undefined) cur.cam = d.cam;
       if (d.sharing !== undefined) cur.sharing = d.sharing;
       memberStatus.set(d.userId, cur);
+      const m = currentList.find(x => x.userId === d.userId);
+      if (m) Object.assign(m, d);
       updateTileStatus(d.userId);
     });
-    socket.on('force-disable', d => {
+    socket.on(EV.MEMBER_PENDING, ({ member }) => {
+      memberNames.set(member.userId, member.name);
+      peerMeta.set(member.userId, { name: member.name, avatar_color: member.avatar_color, avatar: member.avatar || '' });
+      currentList = currentList.filter(m => m.userId !== member.userId).concat([member]);
+      renderOneMember(member);
+      renderPendingCards();
+      playBeep();
+      showToast('درخواست ورود از سمت ' + (member.name || 'یک کاربر'));
+    });
+    socket.on(EV.MEMBER_APPROVED, ({ member }) => {
+      memberNames.set(member.userId, member.name);
+      peerMeta.set(member.userId, { name: member.name, avatar_color: member.avatar_color, avatar: member.avatar || '' });
+      currentList = currentList.filter(m => m.userId !== member.userId).concat([member]);
+      memberStatus.set(member.userId, { muted: false, cam: false, sharing: false });
+      if (member.userId !== I.me.id) {
+        getOrCreateTile(member.userId, member);
+        createPC(member, I.me.id > member.userId);
+      }
+      renderOneMember(member);
+      renderPendingCards();
+    });
+    socket.on(EV.MEMBER_KICKED, ({ userId }) => {
+      currentList = currentList.filter(m => m.userId !== userId);
+      removeMemberRow(userId);
+      destroyPC(userId);
+      removeTile(userId);
+      renderPendingCards();
+    });
+    socket.on(EV.MEMBER_BLOCKED, ({ userId }) => {
+      currentList = currentList.filter(m => m.userId !== userId);
+      removeMemberRow(userId);
+      destroyPC(userId);
+      removeTile(userId);
+      renderPendingCards();
+    });
+    socket.on(EV.FORCE_DISABLE, d => {
       if (d.kind === 'audio') {
         if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !d.off);
         micOn = !d.off; updateControlUI(); broadcastStatus();
@@ -325,186 +460,94 @@
         if (d.off) stopShare();
       }
     });
-    socket.on('you-rejected', () => { showToast('درخواست شما رد شد'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
-    socket.on('you-removed', () => { showToast('از تماس حذف شدید'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
-    socket.on('you-blocked', () => { showToast('شما از طرف ادمین مسدود شدید و اجازه ورود به این تماس را ندارید'); setTimeout(() => location.href = I.base + '/home.php', 2500); });
-    socket.on('join-alert', d => {
+    socket.on(EV.YOU_REJECTED, () => { showToast('درخواست شما رد شد'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
+    socket.on(EV.YOU_REMOVED, () => { showToast('از تماس حذف شدید'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
+    socket.on(EV.YOU_BLOCKED, () => { showToast('شما مسدود شدید'); setTimeout(() => location.href = I.base + '/home.php?err=blocked', 2000); });
+    socket.on(EV.JOIN_ALERT, d => {
       playBeep();
       showToast('درخواست ورود از سمت ' + (d.name || 'یک کاربر'));
       try { if ('Notification' in window && Notification.permission === 'granted') new Notification('درخواست ورود', { body: d.name || '' }); } catch (e) {}
     });
 
-    // Periodic re-sync (every 60s) so the UI stays consistent without refresh
-    setInterval(() => { if (socket && socket.connected) socket.emit('sync'); }, 60000);
-  }
-  function setupSocket() {
-    // Re-bind all call handlers onto the shared socket (page scripts may have attached none yet)
-    socket.on('connect', () => { if (mediaReady) doJoin(); });
-    socket.on('error-msg', d => showToast(d.msg || 'خطا'));
-    socket.on('approved', () => { approved = true; $('waiting-overlay').classList.add('hidden'); broadcastStatus(); });
-    socket.on('you-approved', () => { approved = true; $('waiting-overlay').classList.add('hidden'); broadcastStatus(); });
-    socket.on('room-peers', peers => {
-      peers.forEach(p => { if (p.userId !== I.me.id) createPC(p, I.me.id > p.userId); });
+    // WebRTC signals (new contract) — legacy 'signal' also kept briefly for safety
+    socket.on(EV.CALL_SIGNAL, ({ from, data }) => { handleSignal(from, data); });
+
+    socket.on(EV.CHAT_NEW_MESSAGE, d => {
+      memberNames.set(d.userId, d.name);
+      appendMessage(d.userId, d.name, d.body, d.userId === I.me.id);
     });
-    socket.on('peer-joined', p => {
-      if (p.userId === I.me.id) return;
-      createPC(p, I.me.id > p.userId);
+    socket.on(EV.CHAT_ACK, d => {
+      if (!d.ok) showToast('ارسال پیام ناموفق: ' + (d.error || ''));
     });
-    socket.on('signal', async ({ from, data }) => {
-      if (!pcMap.has(from)) {
-        const meta = peerMeta.get(from) || { name: memberNames.get(from) || '', avatar_color: '#4f46e5' };
-        createPC({ userId: from, ...meta }, false);
-        updateTileName(from);
-      }
-      const pc = pcMap.get(from);
-      try {
-        if (data.type === 'offer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(data));
-          const ans = await pc.createAnswer();
-          await pc.setLocalDescription(ans);
-          socket.emit('signal', { to: from, data: pc.localDescription });
-        } else if (data.type === 'answer') {
-          await pc.setRemoteDescription(new RTCSessionDescription(data));
-        } else if (data.type === 'ice') {
-          try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) {}
-        }
-      } catch (e) {}
-    });
-    socket.on('peer-left', ({ userId }) => {
-      const pc = pcMap.get(userId);
-      if (pc) { pc.close(); pcMap.delete(userId); }
-      removeTile(userId);
-      layoutGrid();
-      peerMeta.delete(userId);
-    });
-    socket.on('member-list', list => renderMembers(list));
-    socket.on('join-request', p => {
-      memberNames.set(p.userId, p.name);
-      if (I.me.is_admin && currentList.every(m => m.userId !== p.userId)) {
-        currentList = currentList.concat([p]);
-        renderMembers(currentList);
-      }
-      playBeep();
-      showToast('درخواست ورود از سمت ' + (p.name || 'یک کاربر'));
-    });
-    socket.on('chat', d => appendMessage(d.userId, memberNames.get(d.userId) || d.name || 'بدون نام', d.body, false));
-    socket.on('emoji', d => spawnEmoji(d.emoji));
-    socket.on('member-status', d => {
-      const cur = memberStatus.get(d.userId) || {};
-      if (d.muted !== undefined) cur.muted = d.muted;
-      if (d.cam !== undefined) cur.cam = d.cam;
-      if (d.sharing !== undefined) cur.sharing = d.sharing;
-      memberStatus.set(d.userId, cur);
-      updateTileStatus(d.userId);
-    });
-    socket.on('force-disable', d => {
-      if (d.kind === 'audio') {
-        if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = !d.off);
-        micOn = !d.off; updateControlUI(); broadcastStatus();
-      } else if (d.kind === 'video') {
-        if (localStream) localStream.getVideoTracks().forEach(t => t.enabled = !d.off);
-        camOn = !d.off;
-        if (camOn && !sharing) currentVideoTrack = cameraTrack;
-        else if (!camOn && !sharing) currentVideoTrack = null;
-        updateSelfVideo(); updateControlUI(); broadcastStatus();
-      } else if (d.kind === 'screen') {
-        if (d.off) stopShare();
-      }
-    });
-    socket.on('you-rejected', () => { showToast('درخواست شما رد شد'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
-    socket.on('you-removed', () => { showToast('از تماس حذف شدید'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
-    socket.on('you-blocked', () => { showToast('شما از طرف ادمین مسدود شدید و اجازه ورود به این تماس را ندارید'); setTimeout(() => location.href = I.base + '/home.php', 2500); });
-    socket.on('join-alert', d => {
-      playBeep();
-      showToast('درخواست ورود از سمت ' + (d.name || 'یک کاربر'));
-      try { if ('Notification' in window && Notification.permission === 'granted') new Notification('درخواست ورود', { body: d.name || '' }); } catch (e) {}
-    });
-    socket.on('connect', () => { const el = $('conn-state'); if (el) { el.textContent = 'زنده'; el.className = 'w-2 h-2 rounded-full bg-secondary'; } });
-    socket.on('disconnect', () => { const el = $('conn-state'); if (el) { el.textContent = 'قطع'; el.className = 'w-2 h-2 rounded-full bg-error'; } });
-    if (socket.connected && mediaReady) doJoin();
+    socket.on(EV.EMOJI, d => spawnEmoji(d.emoji));
   }
 
-  // Apply local (per-viewer) audio/video overrides and global member status
-  function applyMediaOverrides(userId) {
-    const v = $('vid-' + userId), av = $('av-' + userId);
-    if (!v) return;
-    const blk = localBlock[userId] || {};
-    const la = localAudio[userId] || {};
-    const st = memberStatus.get(userId) || {};
-    v.muted = !!(blk.audio || la.muted);
-    v.volume = (la.volume !== undefined) ? la.volume : 1;
-    const hideVideo = blk.video || st.cam === false;
-    if (hideVideo) { v.style.display = 'none'; if (av) av.style.display = 'flex'; }
-    else { v.style.display = ''; if (av) av.style.display = 'none'; }
-  }
-
-  // Keep a tile's displayed name in sync with the real display name
-  function updateTileName(userId) {
-    const el = $('name-' + userId);
-    if (!el) return;
-    const nm = memberNames.get(userId) || (peerMeta.get(userId) || {}).name;
-    el.textContent = nm || 'بدون نام';
-  }
-
-  // Arrange the grid so tiles wrap responsively based on available width
-  function layoutGrid() {
-    if (!grid) return;
-    grid.style.display = 'grid';
-    grid.style.gap = '1rem';
-    // As many boxes per row as fit (>=260px each); wraps to 2/3/... rows on narrow screens
-    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))';
-  }
-  window.addEventListener('resize', layoutGrid);
-
-  function updateTileStatus(userId) {
-    const st = memberStatus.get(userId) || {};
-    const mic = $('mic-' + userId);
-    if (mic) {
-      mic.textContent = st.muted ? 'mic_off' : 'mic';
-      mic.classList.toggle('text-error', !!st.muted);
-      mic.classList.toggle('text-secondary', !st.muted);
+  // ---------- Sidebar / members (incremental) ----------
+  function memberRow(m) {
+    const isSelf = m.userId === I.me.id;
+    const row = document.createElement('div');
+    row.className = 'flex items-center gap-3 p-2 hover:bg-surface-container rounded-lg transition-colors group';
+    row.dataset.uid = m.userId;
+    const mutedIcon = m.muted ? '<span class="material-symbols-outlined text-[10px] text-on-error">mic_off</span>' : '<span class="material-symbols-outlined text-[10px] text-on-secondary">mic</span>';
+    let actions = '';
+    if (I.me.is_admin && !isSelf) {
+      actions = `<div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
+        <button class="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-md" title="حذف" onclick="adminRemove(${m.userId})"><span class="material-symbols-outlined text-[18px]">person_remove</span></button>
+      </div>`;
     }
-    applyMediaOverrides(userId);
+    row.innerHTML = `
+      <div class="relative">
+        <div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant">${avatarMarkup(m)}</div>
+        <span class="absolute -bottom-1 -right-1 w-4 h-4 ${m.status === 'approved' ? 'bg-secondary' : 'bg-error'} rounded-full border-2 border-surface-container-low flex items-center justify-center">${mutedIcon}</span>
+      </div>
+      <div class="flex-1 min-w-0">
+        <h4 class="font-body-sm font-semibold text-on-surface truncate">${escapeHtml(m.name)}${isSelf ? ' (شما)' : ''}</h4>
+        <p class="font-label-sm text-on-surface-variant text-[10px]">${m.status === 'approved' ? (m.is_admin ? 'مدیر تماس' : 'عضو') : 'در انتظار تایید'}</p>
+      </div>${actions}`;
+    row.oncontextmenu = (e) => openMemberMenu(e, m.userId, m.name);
+    return row;
   }
 
-  // ---------- Sidebar / members ----------
-  function renderMembers(list) {
-    currentList = list;
-    list.forEach(m => memberNames.set(m.userId, m.name));
+  function upsertMemberRow(m) {
     const wrap = $('member-list');
-    const req = $('join-requests');
-    wrap.innerHTML = ''; req.innerHTML = '';
-    let pendingCount = 0;
-    list.forEach(m => {
-      const isSelf = m.userId === I.me.id;
-      const row = document.createElement('div');
-      row.className = 'flex items-center gap-3 p-2 hover:bg-surface-container rounded-lg transition-colors group';
-      const mutedIcon = m.muted ? '<span class="material-symbols-outlined text-[10px] text-on-error">mic_off</span>' : '<span class="material-symbols-outlined text-[10px] text-on-secondary">mic</span>';
-      let actions = '';
-      if (I.me.is_admin && !isSelf) {
-        actions = `<div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-          <button class="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-md" title="حذف" onclick="adminRemove(${m.userId})"><span class="material-symbols-outlined text-[18px]">person_remove</span></button>
-        </div>`;
-      }
-      row.innerHTML = `
-        <div class="relative">
-          <div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant">${avatarMarkup(m, '')}</div>
-          <span class="absolute -bottom-1 -right-1 w-4 h-4 ${m.status === 'approved' ? 'bg-secondary' : 'bg-error'} rounded-full border-2 border-surface-container-low flex items-center justify-center">${mutedIcon}</span>
-        </div>
-        <div class="flex-1 min-w-0">
-          <h4 class="font-body-sm font-semibold text-on-surface truncate">${escapeHtml(m.name)}${isSelf ? ' (شما)' : ''}</h4>
-          <p class="font-label-sm text-on-surface-variant text-[10px]">${m.status === 'approved' ? (m.is_admin ? 'مدیر تماس' : 'عضو') : 'در انتظار تایید'}</p>
-        </div>${actions}`;
-      wrap.appendChild(row);
-      row.oncontextmenu = (e) => openMemberMenu(e, m.userId, m.name);
+    const existing = wrap.querySelector(`[data-uid="${m.userId}"]`);
+    const newRow = memberRow(m);
+    if (existing) existing.replaceWith(newRow);
+    else wrap.appendChild(newRow);
+  }
+  function removeMemberRow(userId) {
+    const wrap = $('member-list');
+    const existing = wrap.querySelector(`[data-uid="${userId}"]`);
+    if (existing) existing.remove();
+  }
+  /** insert in list order; keeps pending members at the bottom */
+  function renderOneMember(m) {
+    upsertMemberRow(m);
+    updateCounts();
+    updateTileName(m.userId);
+    updateTileStatus(m.userId);
+  }
+  function updateCounts() {
+    const list = currentList;
+    $('participant-count').textContent = list.length;
+    const pendingCount = list.filter(m => m.status !== 'approved' && m.userId !== I.me.id).length;
+    const badge = $('admin-badge'); if (badge) badge.classList.toggle('hidden', pendingCount === 0);
+    const sBadge = $('sidebar-badge'); if (sBadge) sBadge.classList.toggle('hidden', pendingCount === 0);
+  }
 
-      if (m.status === 'pending' && I.me.is_admin && !isSelf) {
+  function renderPendingCards() {
+    const req = $('join-requests');
+    if (!req) return;
+    req.innerHTML = '';
+    let pendingCount = 0;
+    currentList.forEach(m => {
+      if (m.status !== 'approved' && I.me.is_admin && m.userId !== I.me.id) {
         pendingCount++;
         const card = document.createElement('div');
         card.className = 'bg-surface-container border border-outline-variant/30 rounded-xl p-3 flex flex-col gap-3';
         card.innerHTML = `
           <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant">${avatarMarkup(m, '')}</div>
+            <div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant">${avatarMarkup(m)}</div>
             <div><h4 class="font-body-sm font-semibold text-on-surface">${escapeHtml(m.name)}</h4><p class="font-label-sm text-on-surface-variant text-[10px]">@${escapeHtml(m.username)}</p></div>
           </div>
           <div class="flex gap-2">
@@ -514,12 +557,8 @@
         req.appendChild(card);
       }
     });
-    $('participant-count').textContent = list.length;
-    const badge = $('admin-badge'); if (badge) badge.classList.toggle('hidden', pendingCount === 0);
-    const sBadge = $('sidebar-badge'); if (sBadge) sBadge.classList.toggle('hidden', pendingCount === 0);
-    list.forEach(m => updateTileName(m.userId));
-    layoutGrid();
-    if (I.me.is_admin) renderAdminMembers(list);
+    updateCounts();
+    if (I.me.is_admin) renderAdminMembers(currentList);
   }
 
   function renderAdminMembers(list) {
@@ -546,7 +585,7 @@
       };
       card.innerHTML = `
         <div class="flex items-center gap-2 mb-3">
-          <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-[12px]" style="background:${m.avatar_color}">${initials(m.name)}</div>
+          <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-[12px]" style="background:${/^#[0-9a-fA-F]{3,8}$/.test(m.avatar_color || '') ? m.avatar_color : '#4f46e5'}">${escapeHtml(initials(m.name))}</div>
           <span class="font-body-sm text-on-surface truncate">${escapeHtml(m.name)}</span>
         </div>
         <div class="grid grid-cols-3 gap-2 text-center">
@@ -572,8 +611,8 @@
     wrap.className = 'flex flex-col ' + (self ? 'items-end' : 'items-start') + ' gap-1';
     const meta = peerMeta.get(userId) || { name: name, avatar: '' };
     const av = self
-      ? '<div class="w-7 h-7 rounded-full overflow-hidden border border-outline-variant">' + avatarMarkup({ name: I.me.name, avatar: I.me.avatar, avatar_color: I.me.avatar_color }, '') + '</div>'
-      : '<div class="w-7 h-7 rounded-full overflow-hidden border border-outline-variant">' + avatarMarkup(meta, '') + '</div>';
+      ? '<div class="w-7 h-7 rounded-full overflow-hidden border border-outline-variant">' + avatarMarkup({ name: I.me.name, avatar: I.me.avatar, avatar_color: I.me.avatar_color }) + '</div>'
+      : '<div class="w-7 h-7 rounded-full overflow-hidden border border-outline-variant">' + avatarMarkup(meta) + '</div>';
     wrap.innerHTML = `
       <div class="flex items-center gap-2 mb-1">
         ${av}
@@ -588,13 +627,17 @@
     const inp = $('chat-input');
     const body = inp.value.trim();
     if (!body) return;
-    appendMessage(I.me.id, I.me.name, body, true);
+    const clientMsgId = 'm' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
     inp.value = '';
-    socket && socket.emit('chat', { body });
-    fetch('api/save_message.php', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csrf: I.csrf, body, meeting_id: I.meeting.id })
-    }).catch(() => {});
+    // optimistic UI: message appears now; server ack + broadcast are idempotent
+    appendMessage(I.me.id, I.me.name, body, true);
+    if (socket && socket.connected) {
+      socket.emit(EV.CALL_CHAT_SEND, { body, clientMsgId }, resp => {
+        if (!resp || !resp.ok) showToast('ارسال پیام ناموفق: ' + ((resp && resp.error) || ''));
+      });
+    } else {
+      showToast('اتصال زنده قطع است');
+    }
   };
 
   // ---------- Emoji ----------
@@ -617,13 +660,7 @@
     d.style.bottom = '100px';
     canvas.appendChild(d);
     setTimeout(() => d.remove(), 2000);
-    if (broadcast) {
-      socket && socket.emit('emoji', { emoji: em });
-      fetch('api/save_emoji.php', {
-        method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams({ csrf: I.csrf, emoji: em, meeting_id: I.meeting.id })
-      }).catch(() => {});
-    }
+    if (broadcast && socket) socket.emit(EV.CALL_EMOJI, { emoji: em });
   }
   window.spawnEmoji = spawnEmoji;
   window.toggleEmojiPicker = function (forceHide) {
@@ -638,7 +675,7 @@
     micOn = !micOn;
     localStream.getAudioTracks().forEach(t => t.enabled = micOn);
     updateControlUI();
-    socket && socket.emit('member-status', { muted: !micOn, cam: camOn, sharing });
+    broadcastStatus();
   };
   window.toggleCam = function () {
     if (!localStream) { showToast('دسترسی به دوربین وجود ندارد'); return; }
@@ -648,7 +685,7 @@
     else if (!camOn && !sharing) { currentVideoTrack = null; }
     updateSelfVideo();
     updateControlUI();
-    socket && socket.emit('member-status', { muted: !micOn, cam: camOn, sharing });
+    broadcastStatus();
   };
   window.toggleShare = function () {
     if (sharing) { stopShare(); return; }
@@ -658,7 +695,7 @@
       sharing = true;
       replaceOutgoingVideo(screenTrack);
       updateControlUI();
-      socket && socket.emit('member-status', { muted: !micOn, cam: camOn, sharing });
+      broadcastStatus();
     }).catch(() => {});
   };
   function stopShare() {
@@ -667,7 +704,7 @@
     currentVideoTrack = camOn ? cameraTrack : null;
     replaceOutgoingVideo(currentVideoTrack);
     updateControlUI();
-    socket && socket.emit('member-status', { muted: !micOn, cam: camOn, sharing });
+    broadcastStatus();
   }
 
   window.copyLink = function () {
@@ -677,31 +714,21 @@
   };
 
   window.leaveCall = function () {
-    socket && socket.emit('leave');
-    fetch('api/leave_meeting.php', {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csrf: I.csrf, meeting_id: I.meeting.id })
-    }).catch(() => {});
-    pcMap.forEach(pc => pc.close());
+    if (socket) socket.emit(EV.CALL_LEAVE, {}, () => {});
+    pcMap.forEach(({ pc }) => pc.close());
     if (localStream) localStream.getTracks().forEach(t => t.stop());
     location.href = I.base + '/home.php';
   };
 
-  // ---------- Admin actions ----------
-  function postAdmin(url, userId) {
-    return fetch(url, {
-      method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csrf: I.csrf, participant_id: String(userId) })
-    }).then(r => r.json());
-  }
+  // ---------- Admin actions (single socket path) ----------
   window.adminApprove = function (userId) {
-    postAdmin('api/approve_member.php', userId).then(() => socket && socket.emit('admin-approve', { userId }));
+    socket && socket.emit(EV.CALL_APPROVE, { userId });
   };
   window.adminReject = function (userId) {
-    postAdmin('api/reject_member.php', userId).then(() => socket && socket.emit('admin-reject', { userId }));
+    socket && socket.emit(EV.CALL_REJECT, { userId });
   };
   window.adminRemove = function (userId) {
-    postAdmin('api/remove_member.php', userId).then(() => socket && socket.emit('admin-remove', { userId }));
+    socket && socket.emit(EV.CALL_KICK, { userId });
   };
   window.adminBlockSelf = function (userId, kind) {
     localBlock[userId] = localBlock[userId] || {};
@@ -712,7 +739,7 @@
   window.adminDisableAll = function (userId, kind) {
     const st = memberStatus.get(userId) || {};
     const off = kind === 'audio' ? !st.muted : kind === 'video' ? (st.cam !== false) : (st.sharing !== false);
-    socket && socket.emit('admin-disable', { userId, kind, off });
+    socket && socket.emit(EV.CALL_DISABLE, { userId, kind, off });
   };
 
   // ---------- Tabs ----------
@@ -725,7 +752,7 @@
     const a = $('tab-' + tab); if (a) { a.classList.add('text-primary', 'border-primary'); a.classList.remove('text-on-surface-variant', 'border-transparent'); }
   };
 
-  // ---------- Right-click member menu (per-viewer audio control) ----------
+  // ---------- Right-click member menu ----------
   function openMemberMenu(e, userId, name) {
     e.preventDefault();
     menuUserId = userId;
@@ -752,12 +779,50 @@
     applyMediaOverrides(menuUserId);
   };
 
+  // ---------- Overrides & tile helpers ----------
+  function applyMediaOverrides(userId) {
+    const v = $('vid-' + userId), av = $('av-' + userId);
+    if (!v) return;
+    const blk = localBlock[userId] || {};
+    const la = localAudio[userId] || {};
+    const st = memberStatus.get(userId) || {};
+    v.muted = !!(blk.audio || la.muted);
+    v.volume = (la.volume !== undefined) ? la.volume : 1;
+    const hideVideo = blk.video || st.cam === false;
+    if (hideVideo) { v.style.display = 'none'; if (av) av.style.display = 'flex'; }
+    else { v.style.display = ''; if (av) av.style.display = 'none'; }
+  }
+  function updateTileName(userId) {
+    const el = $('name-' + userId);
+    if (!el) return;
+    const nm = memberNames.get(userId) || (peerMeta.get(userId) || {}).name;
+    el.textContent = nm || 'بدون نام';
+  }
+  function layoutGrid() {
+    if (!grid) return;
+    grid.style.display = 'grid';
+    grid.style.gap = '1rem';
+    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))';
+  }
+  window.addEventListener('resize', layoutGrid);
+
+  function updateTileStatus(userId) {
+    const st = memberStatus.get(userId) || {};
+    const mic = $('mic-' + userId);
+    if (mic) {
+      mic.textContent = st.muted ? 'mic_off' : 'mic';
+      mic.classList.toggle('text-error', !!st.muted);
+      mic.classList.toggle('text-secondary', !st.muted);
+    }
+    applyMediaOverrides(userId);
+  }
+
   // ---------- Init ----------
+  let mediaReady = false;
   function init() {
     renderSelf();
     if (!approved) $('waiting-overlay').classList.remove('hidden');
-    // Seed participants from server data immediately so member boxes + sidebar
-    // are visible even before the realtime channel connects.
+    // bootstrap tiles from SSR data (HTTP bootstrap rule) — realtime updates take over after join
     if (I.participants && I.participants.length) {
       const mapped = I.participants.map(p => ({
         userId: p.user_id, name: p.display_name, username: p.username,
@@ -765,26 +830,27 @@
         muted: !!p.muted, cam: !!p.cam_on, sharing: !!p.sharing,
         avatar_color: p.avatar_color, avatar: p.avatar
       }));
-      mapped.forEach(m => { if (m.userId !== I.me.id) getOrCreateTile(m.userId, m); });
-      renderMembers(mapped);
+      mapped.forEach(m => {
+        memberNames.set(m.userId, m.name);
+        if (m.userId !== I.me.id && m.status === 'approved') getOrCreateTile(m.userId, m);
+      });
+      currentList = mapped;
+      mapped.forEach(renderOneMember);
+      renderPendingCards();
     }
-    // seed messages
     (I.messages || []).forEach(m => appendMessage(m.user_id, m.display_name, m.body, m.user_id === I.me.id));
-    // seed emoji (show briefly)
     (I.emojis || []).forEach(e => spawnEmoji(e.emoji, false));
     buildEmojiGrid();
     layoutGrid();
     const mm = $('member-menu');
     if (mm) mm.addEventListener('click', e => e.stopPropagation());
     document.addEventListener('click', () => { const m = $('member-menu'); if (m) m.classList.add('hidden'); });
-    // Start media first, then connect to socket and join
+
     startMedia().then(() => {
       mediaReady = true;
-      connect();
-      doJoin();
-      broadcastStatus();
-    }).catch(() => {
-      updateControlUI();
+      connectSocket();
+      // if socket already connected (fast reconnect), join now
+      if (socket && socket.connected) doJoin();
     });
   }
   init();

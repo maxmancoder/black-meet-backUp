@@ -52,9 +52,11 @@
     postJSON('api/resend_otp.php', { csrf, phone: currentPhone, purpose: currentPurpose })
       .then(d => {
         if (d.ok) {
-          lastOtp = d.otp;
-          document.getElementById('otp-code').textContent = d.otp;
-          document.getElementById('otp-display').classList.remove('hidden');
+          lastOtp = d.otp || '';
+          if (lastOtp) {
+            document.getElementById('otp-code').textContent = lastOtp;
+            document.getElementById('otp-display').classList.remove('hidden');
+          }
           startTimer();
           showToast('کد جدید ارسال شد', 3000);
         } else showToast(d.msg || 'خطا');
@@ -111,7 +113,7 @@
     postJSON('api/signup.php', data)
       .then(d => {
         if (d.ok) {
-          currentPhone = d.phone; currentPurpose = d.purpose; lastOtp = d.otp;
+          currentPhone = d.phone; currentPurpose = d.purpose; lastOtp = d.otp || '';
           switchView('view-otp');
         } else showToast(d.msg || 'خطا');
       });

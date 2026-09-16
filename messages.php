@@ -2,10 +2,11 @@
 $title = 'پیام‌ها - Black Meet';
 require_once __DIR__ . '/auth.php';
 require_login();
-require_once __DIR__ . '/partials/head.php';
 $me = current_user();
 if (empty($me['is_manager'])) { header('Location: ' . base_url() . '/home.php'); exit; }
 ensure_schema_extras();
+// head.php outputs HTML → include only AFTER all possible header() redirects
+require_once __DIR__ . '/partials/head.php';
 $csrf = csrf_token();
 ?>
 </head>
@@ -67,6 +68,6 @@ $csrf = csrf_token();
     <span class="material-symbols-outlined">error</span><span id="toast-message"></span></div></div>
 
 <script>window.CSRF = <?= json_encode($csrf) ?>; window.BASE = <?= json_encode(base_url()) ?>;</script>
-<script src="<?= base_url() ?>/assets/js/messages.js"></script>
+<script src="<?= asset_url('assets/js/messages.js') ?>"></script>
 </body>
 </html>

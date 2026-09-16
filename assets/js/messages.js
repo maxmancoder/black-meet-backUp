@@ -1,9 +1,10 @@
-// assets/js/messages.js
+// assets/js/messages.js — Phase 1: realtime private messages (no polling)
 (function () {
   const BASE = window.BASE;
   const CSRF = window.CSRF;
+  const EV = window.BMEv;
   let convs = [];
-  let view = null; // {type:'user', user_id, name, username, avatar, email} | {type:'public'}
+  let view = null; // {type:'user', user_id, ...} | {type:'public'}
 
   function esc(s) {
     return String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -19,15 +20,20 @@
     t.classList.remove('hidden');
     setTimeout(() => t.classList.add('hidden'), 4000);
   }
-  function avatarInner(avatar, color, name, sizeCls) {
+  function avatarInner(avatar, color, name) {
     if (avatar) return '<img src="' + esc(aUrl(avatar)) + '" class="w-full h-full object-cover" alt=""/>';
     const p = (name || '').trim().split(/\s+/);
     const init = p.length >= 2 ? p[0][0] + p[1][0] : (name || '؟').slice(0, 2);
     return '<div class="w-full h-full flex items-center justify-center font-display-md text-white" style="background:' + (color || '#4f46e5') + '">' + esc(init) + '</div>';
   }
-  function isOnline(la) {
-    if (!la) return false;
-    return (new Date().getTime() - new Date(la.replace(' ', 'T') + 'Z').getTime()) < 5 * 60 * 1000;
+
+  // ---- presence (realtime online/offline instead of last_activity) ----
+  const onlineUsers = new Set();
+  function isOnline(userId) { return onlineUsers.has(Number(userId)); }
+  function refreshHeaderStatus() {
+    if (!view || view.type !== 'user') return;
+    const el = document.getElementById('ph-status');
+    if (el) el.textContent = isOnline(view.user_id) ? 'آنلاین' : 'آفلاین';
   }
 
   function loadConvs() {
@@ -41,11 +47,30 @@
       .catch(() => {});
   }
 
+  // incremental conversation row update (no full re-render)
+  function updateConvRow(userId, patch) {
+    const c = convs.find(x => Number(x.user_id) === Number(userId));
+    if (!c) { loadConvs(); return; }
+    Object.assign(c, patch);
+    const box = document.getElementById('conv-list');
+    const rows = box.querySelectorAll('[data-uid]');
+    rows.forEach(row => {
+      if (Number(row.dataset.uid) === Number(userId)) {
+        const unread = Number(c.unread || 0);
+        let dot = row.querySelector('.unread-dot');
+        if (unread > 0 && !dot) {
+          dot = document.createElement('span');
+          dot.className = 'unread-dot absolute top-0 right-0 w-3 h-3 bg-primary rounded-full border-2 border-surface-container-low';
+          row.querySelector('.relative') && row.querySelector('.relative').appendChild(dot);
+        } else if (unread === 0 && dot) dot.remove();
+      }
+    });
+  }
+
   function renderConvs() {
     const q = (document.getElementById('conv-search').value || '').trim().toLowerCase();
     const box = document.getElementById('conv-list');
     box.innerHTML = '';
-    // public item
     const pub = document.createElement('div');
     pub.className = 'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ' + (view && view.type === 'public' ? 'bg-primary-container/40' : 'hover:bg-surface-container-high');
     pub.innerHTML = '<div class="w-10 h-10 rounded-full bg-secondary-container flex items-center justify-center text-on-secondary-container"><span class="material-symbols-outlined">campaign</span></div>' +
@@ -55,9 +80,10 @@
 
     convs.filter(c => !q || (c.display_name + ' ' + c.username).toLowerCase().includes(q)).forEach(c => {
       const el = document.createElement('div');
+      el.dataset.uid = c.user_id;
       el.className = 'flex items-center gap-3 p-2 rounded-lg cursor-pointer transition-colors ' + (view && view.type === 'user' && view.user_id === c.user_id ? 'bg-primary-container/40' : 'hover:bg-surface-container-high');
-      el.innerHTML = '<div class="relative w-10 h-10 rounded-full overflow-hidden border border-outline-variant">' + avatarInner(c.avatar, '#4f46e5', c.display_name, '') +
-        (c.unread > 0 ? '<span class="absolute top-0 right-0 w-3 h-3 bg-primary rounded-full border-2 border-surface-container-low"></span>' : '') + '</div>' +
+      el.innerHTML = '<div class="relative w-10 h-10 rounded-full overflow-hidden border border-outline-variant">' + avatarInner(c.avatar, '#4f46e5', c.display_name) +
+        (Number(c.unread) > 0 ? '<span class="unread-dot absolute top-0 right-0 w-3 h-3 bg-primary rounded-full border-2 border-surface-container-low"></span>' : '') + '</div>' +
         '<div class="flex-1 min-w-0"><h4 class="font-body-sm font-semibold text-on-surface truncate">' + esc(c.display_name) + '</h4><p class="font-label-sm text-on-surface-variant text-[10px]">@' + esc(c.username) + '</p></div>';
       el.onclick = () => openUser(c);
       box.appendChild(el);
@@ -70,28 +96,34 @@
     const h = document.getElementById('profile-header');
     h.classList.remove('hidden');
     h.classList.add('flex');
-    document.getElementById('ph-avatar').innerHTML = avatarInner(c.avatar, '#4f46e5', c.display_name, '');
+    document.getElementById('ph-avatar').innerHTML = avatarInner(c.avatar, '#4f46e5', c.display_name);
     document.getElementById('ph-name').textContent = c.display_name;
-    document.getElementById('ph-status').textContent = c.type === 'public' ? 'اعلان عمومی' : (isOnline(c.last_activity) ? 'آنلاین' : 'آفلاین');
+    document.getElementById('ph-status').textContent = c.type === 'public' ? 'اعلان عمومی' : (isOnline(c.user_id) ? 'آنلاین' : 'آفلاین');
   }
 
-  function renderChat(messages, type, color) {
+  function appendMessage(m, fromMgr) {
+    const box = document.getElementById('chat-area');
+    const el = document.createElement('div');
+    el.className = 'flex flex-col ' + (fromMgr ? 'items-start' : 'items-end');
+    el.innerHTML = '<div class="' + (fromMgr ? 'bg-surface-container-high text-on-surface' : 'bg-primary-container text-on-primary-container') + ' p-3 rounded-2xl ' + (fromMgr ? 'rounded-tr-sm' : 'rounded-tl-sm') + ' text-body-sm max-w-[80%] border border-white/5">' + esc(m.body) + '</div>';
+    box.appendChild(el);
+    box.scrollTop = box.scrollHeight;
+    if (m.id) window._lastThreadId = Math.max(window._lastThreadId || 0, Number(m.id));
+  }
+
+  function renderChat(messages, type) {
     const box = document.getElementById('chat-area');
     box.innerHTML = '';
     (messages || []).forEach(m => {
       const fromMgr = (type === 'public') ? true : !!m.from_manager;
-      const el = document.createElement('div');
-      el.className = 'flex flex-col ' + (fromMgr ? 'items-start' : 'items-end');
-      el.innerHTML = '<div class="' + (fromMgr ? 'bg-surface-container-high text-on-surface' : 'bg-primary-container text-on-primary-container') + ' p-3 rounded-2xl ' + (fromMgr ? 'rounded-tr-sm' : 'rounded-tl-sm') + ' text-body-sm max-w-[80%] border border-white/5">' + esc(m.body) + '</div>';
-      box.appendChild(el);
+      appendMessage(m, fromMgr);
     });
-    box.scrollTop = box.scrollHeight;
-    window._lastThreadId = (messages || []).reduce((mx, m) => Math.max(mx, Number(m.id) || 0), 0);
   }
 
   function openUser(c) {
-    view = { type: 'user', user_id: c.user_id, name: c.display_name, username: c.username, avatar: c.avatar, email: c.email, last_activity: c.last_activity };
+    view = { type: 'user', user_id: Number(c.user_id), name: c.display_name, username: c.username, avatar: c.avatar, email: c.email };
     setHeader(view);
+    refreshHeaderStatus();
     fetch('api/pv_manager.php?user_id=' + c.user_id)
       .then(r => r.json())
       .then(d => { if (d.ok) renderChat(d.messages, 'user'); loadConvs(); })
@@ -107,37 +139,47 @@
       .catch(() => {});
   }
 
-  // Live update: re-fetch the active thread and render only if new messages arrived
-  function maybeRender(msgs, type) {
-    const maxId = (msgs || []).reduce((mx, m) => Math.max(mx, Number(m.id) || 0), 0);
-    if (maxId <= (window._lastThreadId || 0)) return;
-    renderChat(msgs, type);
-  }
-  function pollThread() {
-    if (!view) return;
-    if (view.type === 'public') {
-      fetch('api/announcements.php')
-        .then(r => r.json())
-        .then(d => { if (d.ok) maybeRender((d.announcements || []).map(a => ({ id: a.id, body: a.body, from_manager: 1 })), 'public'); })
-        .catch(() => {});
-    } else {
-      fetch('api/pv_manager.php?user_id=' + view.user_id)
-        .then(r => r.json())
-        .then(d => { if (d.ok) { maybeRender(d.messages || [], 'user'); loadConvs(); } })
-        .catch(() => {});
-    }
-  }
-  setInterval(pollThread, 3000);
-
-  // ---- Live channel: announcements push instantly (no refresh) ----
-  if (window.BMLive) {
-    BMLive.subscribe('announcements');
-    BMLive.on('announcements', a => {
-      loadConvs();
-      if (view && view.type === 'public' && a && a.body) {
-        pollThread();
-        showToast('اعلان جدید دریافت شد');
+  // ---- realtime: incoming PV messages ----
+  if (window.BMLive && EV) {
+    BMLive.on(EV.PV_NEW_MESSAGE, m => {
+      // thread open & message belongs to this conversation?
+      if (view && view.type === 'user' && Number(m.fromUserId) === view.user_id) {
+        appendMessage({ id: m.id, body: m.body, from_manager: 0 }, false);
+        // mark seen server-side (manager console opens the thread)
+        fetch('api/pv_manager.php?user_id=' + view.user_id, { method: 'GET' });
+        updateConvRow(view.user_id, { unread: 0 });
+      } else if (view && view.type === 'user' && view.user_id === Number(m.fromUserId)) {
+        // echo of my own send handled via PV_ACK — ignore duplicates
       }
+    });
+
+    BMLive.on(EV.PV_CONVERSATION_UPDATED, d => {
+      const c = convs.find(x => Number(x.user_id) === Number(d.userId));
+      updateConvRow(d.userId, { unread: c ? (Number(c.unread || 0) + 1) : 1, last: d.lastBody });
+      if (!convs.find(x => Number(x.user_id) === Number(d.userId))) loadConvs();
+    });
+
+    BMLive.on(EV.PRESENCE_ONLINE, d => { onlineUsers.add(Number(d.userId)); refreshHeaderStatus(); });
+    BMLive.on(EV.PRESENCE_OFFLINE, d => { onlineUsers.delete(Number(d.userId)); refreshHeaderStatus(); });
+    BMLive.on('live:connected', () => {
+      loadConvs();
+      // ask server who is online right now
+      const s = BMLive.socket();
+      if (s && s.connected) s.emit('presence:list', resp => {
+        if (resp && resp.ok) { (resp.online || []).forEach(u => onlineUsers.add(Number(u))); refreshHeaderStatus(); }
+      });
+    });
+
+    // ---- 1:1 call request UI ----
+    let incomingCall = null;
+    BMLive.on(EV.CALLREQ_INCOMING, d => {
+      incomingCall = d;
+      showToast('تماس ورودی از ' + (d.fromName || 'کاربر') + ' — کنسول پیام‌ها');
+      const accept = confirm('تماس ورودی از ' + (d.fromName || 'کاربر') + ' را می‌پذیرید؟');
+      if (!BMLive.socket()) return;
+      if (accept) BMLive.socket().emit(EV.CALLREQ_ACCEPT, { requestId: d.requestId });
+      else BMLive.socket().emit(EV.CALLREQ_REJECT, { requestId: d.requestId });
+      incomingCall = null;
     });
   }
 
@@ -150,21 +192,26 @@
       fetch('api/announcements.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: CSRF, body }) })
         .then(r => r.json()).then(d => {
           if (!d.ok) return showToast(d.msg || 'خطا');
-          inp.value = ''; openPublic(); showToast('اعلان ارسال شد');
-        }).catch(() => showToast('خطا'));
-    } else {
-      fetch('api/pv_manager.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: CSRF, user_id: String(view.user_id), body }) })
-        .then(r => r.json()).then(d => {
-          if (!d.ok) return showToast(d.msg || 'خطا');
           inp.value = '';
-          fetch('api/pv_manager.php?user_id=' + view.user_id).then(r => r.json()).then(d2 => { if (d2.ok) renderChat(d2.messages, 'user'); });
+          appendMessage({ id: null, body, from_manager: 1 }, true);
+          showToast('اعلان ارسال شد');
         }).catch(() => showToast('خطا'));
+      return;
     }
+    // realtime PV send with client id (idempotent) + pending UI
+    const clientMsgId = 'c' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+    appendMessage({ id: null, body, from_manager: 0 }, false);
+    inp.value = '';
+    const s = window.BMLive && BMLive.socket();
+    if (!s || !s.connected) { showToast('اتصال زنده قطع است — بعداً دوباره تلاش کنید'); return; }
+    s.emit(EV.PV_SEND, { toUserId: view.user_id, body, clientMsgId }, resp => {
+      if (!resp || !resp.ok) showToast('ارسال پیام ناموفق بود');
+    });
   };
 
   window.openProfileModal = function () {
     if (!view || view.type !== 'user') return;
-    document.getElementById('pm-avatar').innerHTML = avatarInner(view.avatar, '#4f46e5', view.name, '');
+    document.getElementById('pm-avatar').innerHTML = avatarInner(view.avatar, '#4f46e5', view.name);
     document.getElementById('pm-name').textContent = view.name;
     document.getElementById('pm-username').textContent = '@' + view.username;
     document.getElementById('pm-email').textContent = view.email || '';
@@ -173,5 +220,4 @@
   window.closeProfileModal = function () { document.getElementById('profile-modal').classList.add('hidden'); };
 
   loadConvs();
-  setInterval(loadConvs, 15000);
 })();

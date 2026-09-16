@@ -6,11 +6,18 @@ require_once __DIR__ . '/db.php';
 
 if (session_status() === PHP_SESSION_NONE) {
     if (!headers_sent()) {
+        // Secure cookie: HttpOnly + SameSite=Lax; Secure flag only when the
+        // request actually arrives over HTTPS (tunnel/production), so local
+        // http://localhost keeps working during development.
+        $isHttps = (!empty($_SERVER['HTTPS']) && strtolower($_SERVER['HTTPS']) !== 'off')
+            || (($_SERVER['HTTP_X_FORWARDED_PROTO'] ?? '') === 'https')
+            || (($_SERVER['SERVER_PORT'] ?? '') == 443);
         session_set_cookie_params([
             'lifetime' => 0,
             'path'     => '/',
             'httponly' => true,
             'samesite' => 'Lax',
+            'secure'   => $isHttps,
         ]);
         session_start();
     }
@@ -18,29 +25,6 @@ if (session_status() === PHP_SESSION_NONE) {
 
 function current_user() {
     if (empty($_SESSION['user_id'])) return null;
-    // Self-heal: ensure new columns exist (older databases)
-    static $patched = false;
-    if (!$patched) {
-        $patched = true;
-        try {
-            $p = db_connect();
-            $cols = ['is_limited' => 'TINYINT(1) NOT NULL DEFAULT 0',
-                     'avatar' => 'VARCHAR(255) NULL',
-                     'last_activity' => 'DATETIME NULL'];
-            foreach ($cols as $col => $def) {
-                $r = $p->query("SELECT 1 FROM information_schema.columns
-                                WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = '$col'");
-                if ($r->fetchColumn() === false) {
-                    $p->exec("ALTER TABLE users ADD COLUMN $col $def");
-                }
-            }
-        } catch (\Throwable $e) { /* non-fatal */ }
-    }
-    static $pwHashed = false;
-    if (!$pwHashed) {
-        $pwHashed = true;
-        ensure_manager_password_hashed();
-    }
     static $u = false;
     if ($u !== false) return $u ?: null;
     $pdo = db_connect();
@@ -49,6 +33,17 @@ function current_user() {
     $stmt->execute([$_SESSION['user_id']]);
     $u = $stmt->fetch();
     return $u ?: null;
+}
+
+/**
+ * Establish the login session safely: regenerate the session id to prevent
+ * session fixation, then set user_id. Call after verifying credentials.
+ */
+function establish_login_session($userId) {
+    if (session_status() === PHP_SESSION_ACTIVE && !headers_sent()) {
+        session_regenerate_id(true);
+    }
+    $_SESSION['user_id'] = (int)$userId;
 }
 
 // Redirect to login if not authenticated (for internal pages)

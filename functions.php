@@ -40,9 +40,11 @@ function turn_config() {
     }
     // Public open-relay fallback (no credentials required)
     // UDP first (fastest relay path), then TCP variants for restrictive NATs.
-    $servers[] = ['urls' => 'turn:openrelay.metered.ca:3478'];
-    $servers[] = ['urls' => 'turn:openrelay.metered.ca:443?transport=tcp'];
-    $servers[] = ['urls' => 'turn:openrelay.metered.ca:80?transport=tcp'];
+    // NOTE: a turn: URL WITHOUT username+credential throws InvalidAccessError in
+    // Chrome and kills the whole RTCPeerConnection — always supply both.
+    $servers[] = ['urls' => 'turn:openrelay.metered.ca:3478', 'username' => 'openrelayproject', 'credential' => 'openrelayproject'];
+    $servers[] = ['urls' => 'turn:openrelay.metered.ca:443?transport=tcp', 'username' => 'openrelayproject', 'credential' => 'openrelayproject'];
+    $servers[] = ['urls' => 'turn:openrelay.metered.ca:80?transport=tcp', 'username' => 'openrelayproject', 'credential' => 'openrelayproject'];
     return $servers;
 }
 
@@ -135,6 +137,15 @@ function e($str) {
     return htmlspecialchars($str ?? '', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
 }
 
+// ---- Asset URL with cache-busting (mtime version) ----
+// Apache caches JS/CSS for a week; without ?v= users keep running stale code
+// after every deploy — which looked like "changes not taking effect".
+function asset_url($path) {
+    $file = __DIR__ . '/' . ltrim($path, '/');
+    $v = @filemtime($file);
+    return base_url() . '/' . ltrim($path, '/') . ($v ? '?v=' . $v : '');
+}
+
 function to_fa_digits($num) {
     $map = ['۰','۱','۲','۳','۴','۵','۶','۷','۸','۹'];
     return strtr((string)$num, array_combine(range(0,9), $map));
@@ -164,65 +175,14 @@ function initials($name) {
 }
 
 // ---- On-the-fly schema patch (adds is_limited if missing) ----
-function ensure_users_limited_column() {
-    static $done = false;
-    if ($done) return;
-    $done = true;
-    try {
-        $pdo = db_connect();
-        $r = $pdo->query("SELECT 1 FROM information_schema.columns
-                          WHERE table_schema = DATABASE() AND table_name = 'users' AND column_name = 'is_limited'");
-        if ($r->fetchColumn() === false) {
-            $pdo->exec('ALTER TABLE users ADD COLUMN is_limited TINYINT(1) NOT NULL DEFAULT 0');
-        }
-    } catch (\Throwable $e) { /* non-fatal */ }
-}
+// PHASE 0 NOTE: these runtime patches are now NO-OPs. All schema objects are
+// created by sql/migrations/001_phase0_schema.sql (applied once out-of-band).
+// Kept as empty functions so existing call sites keep working until Phase 1.
+function ensure_users_limited_column() { /* moved to sql/migrations/001 */ }
 
-// ---- On-the-fly schema patch: avatars, presence, blocks, PM, announcements ----
-function ensure_schema_extras() {
-    static $done = false;
-    if ($done) return;
-    $done = true;
-    try {
-        $pdo = db_connect();
-        // users.avatar + last_activity
-        $cols = $pdo->query("SELECT COLUMN_NAME FROM information_schema.columns WHERE table_schema = DATABASE() AND table_name = 'users'")->fetchAll(PDO::FETCH_COLUMN);
-        if (!in_array('avatar', $cols, true)) $pdo->exec('ALTER TABLE users ADD COLUMN avatar VARCHAR(255) NULL');
-        if (!in_array('last_activity', $cols, true)) $pdo->exec('ALTER TABLE users ADD COLUMN last_activity DATETIME NULL');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS meeting_blocks (
-            meeting_id INT UNSIGNED NOT NULL, user_id INT UNSIGNED NOT NULL,
-            PRIMARY KEY (meeting_id, user_id), KEY idx_mb_user (user_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS pv_messages (
-            id INT UNSIGNED NOT NULL AUTO_INCREMENT, user_id INT UNSIGNED NOT NULL,
-            from_manager TINYINT(1) NOT NULL DEFAULT 0, body TEXT NOT NULL,
-            seen TINYINT(1) NOT NULL DEFAULT 0, created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id), KEY idx_uid (user_id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
-        $pdo->exec('CREATE TABLE IF NOT EXISTS announcements (
-            id INT UNSIGNED NOT NULL AUTO_INCREMENT, body TEXT NOT NULL,
-            created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-            PRIMARY KEY (id)
-        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4');
-    } catch (\Throwable $e) { /* non-fatal */ }
-}
+function ensure_schema_extras() { /* moved to sql/migrations/001 */ }
 
-// ---- Ensure manager password is hashed (regular users stay plaintext) ----
-function ensure_manager_password_hashed() {
-    static $done = false;
-    if ($done) return;
-    $done = true;
-    try {
-        $pdo = db_connect();
-        $stmt = $pdo->query("SELECT id, password_hash FROM users WHERE is_manager=1");
-        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $ph = (string)$row['password_hash'];
-            if ($ph === '' || strpos($ph, '$2y$') === 0) continue; // already hashed
-            $hash = password_hash($ph, PASSWORD_BCRYPT);
-            $pdo->prepare('UPDATE users SET password_hash=? WHERE id=?')->execute([$hash, $row['id']]);
-        }
-    } catch (\Throwable $e) { /* non-fatal */ }
-}
+function ensure_manager_password_hashed() { /* migration handled by tools/migrate_passwords.php */ }
 
 // ---- Avatar URL helper ----
 function avatar_url($avatar) {

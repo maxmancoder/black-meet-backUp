@@ -1,6 +1,7 @@
-﻿// assets/js/home.js
+// assets/js/home.js — Phase 1: notifications via realtime (no polling)
 (function () {
   const BASE = window.BASE;
+  const EV = window.BMEv;
   localStorage.setItem('blackmeet_logged_in', '1');
 
   function showToast(msg) {
@@ -13,10 +14,8 @@
   function extractRoom(val) {
     val = val.trim();
     if (!val) return '';
-    // full URL with ?room=xxx
     const m = val.match(/[?&]room=([^&\s]+)/);
     if (m) return m[1];
-    // trailing path segment
     const u = val.match(/call\.php\/([^/\s]+)/);
     if (u) return u[1];
     return val;
@@ -47,11 +46,10 @@
       });
   };
 
-  // Blocked redirect message
   const params = new URLSearchParams(location.search);
   if (params.get('err') === 'blocked') showToast('شما از طرف ادمین مسدود شدید و اجازه ورود به این تماس را ندارید');
 
-  // ---- Manager notifications (announcements) ----
+  // ---- Notifications: bootstrap once via HTTP, then realtime only ----
   let notifSort = 'new';
   window.toggleNotifications = function () {
     const p = document.getElementById('notif-popup');
@@ -68,28 +66,29 @@
   function loadNotifications() {
     fetch('api/announcements.php')
       .then(r => r.json())
-      .then(d => { window._notifs = (d.announcements || []); renderNotifications(window._notifs); const dot = document.getElementById('bell-dot'); if (dot) dot.classList.toggle('hidden', (window._notifs.length === 0)); })
+      .then(d => { window._notifs = (d.announcements || []); renderNotifications(window._notifs); updateBellDot(); })
       .catch(() => {});
   }
+  function updateBellDot() {
+    const dot = document.getElementById('bell-dot');
+    if (dot) dot.classList.toggle('hidden', !(window._notifs || []).length);
+  }
 
-  // ---- Live channel: new announcements appear instantly, no refresh ----
-  if (window.BMLive) {
-    BMLive.subscribe('announcements');
-    BMLive.on('announcements', a => {
+  // realtime: new announcements arrive via notif:new (pushed by PHP internal API)
+  if (window.BMLive && EV) {
+    BMLive.on(EV.NOTIF_NEW, a => {
       const list = window._notifs || [];
-      if (a && a.body && !list.some(x => x.body === a.body)) {
+      if (a && a.body && !list.some(x => x.id === a.id || x.body === a.body)) {
         list.unshift(a);
         window._notifs = list;
         renderNotifications(list);
-        const dot = document.getElementById('bell-dot');
-        if (dot) dot.classList.remove('hidden');
+        updateBellDot();
         showToast('اعلان جدید: ' + a.body);
       }
     });
-    BMLive.on('live:connected', () => loadNotifications()); // catch-up after reconnect
+    BMLive.on('live:connected', () => loadNotifications()); // catch-up bootstrap after reconnect
   }
-  // Fallback poll (slower) in case the live channel is unavailable
-  setInterval(loadNotifications, 45000);
+
   function renderNotifications(list) {
     const box = document.getElementById('notif-list');
     if (!box) return;
