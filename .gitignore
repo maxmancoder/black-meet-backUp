@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+
+# Sensitive config
+config.json
+.env
+
+# Uploaded files
+uploads/*
+!uploads/.gitkeep
+
+# Temp files
+*.log
+*.tmp
+*.swp
+node.err
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+npm-debug.log*
+
+# Tunnel files (regenerated)
+tunnel_url.txt
+turn_host.txt
+
+# Bore executable
+**/bore.exe
+**/bore.zip
+
+# SSH logs
+ssh-*.log
+
+# Tools (large binaries)
+tools/cloudflared.exe

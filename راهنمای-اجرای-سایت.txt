@@ -1,0 +1,405 @@
+═══════════════════════════════════════════════════════════════════
+      راهنمای کامل اجرای سایت Black Meet  (نسخه فارسی)
+      مسیر پروژه: C:\xampp\htdocs\black-meet
+═══════════════════════════════════════════════════════════════════
+
+این فایل راهنمای رسمی و کامل اجرای سایت است.
+هر وقت خواستی سایت را اجرا، بررسی سلامت یا خاموش کنی، همین فایل را باز کن.
+(خلاصه انگلیسی در انتهای فایل آمده است / English summary at the end.)
+
+═══════════════════════════════════════════════════════════════════
+  ۱) اجرای سریع (توصیه می‌شود)
+═══════════════════════════════════════════════════════════════════
+
+فایل start-all.bat را از پوشه پروژه دابل‌کلیک کن.
+به‌صورت خودکار این‌ها را اجرا می‌کند:
+
+    ۱. Apache        → وب‌سرور سایت (پورت 80)
+    ۲. MySQL         → دیتابیس (پورت 3306)
+    ۳. node server.js    → سرور سیگنالینگ تماس (پورت 3000)
+    ۴. node turn.js      → سرور TURN (پورت 3478)
+    ۵. node turn-proxy.js → پروکسی TCP برای TURN
+    ۶. keep-tunnel.ps1   → تونل عمومی سایت + خودترمیم
+    ۷. keep-bore.ps1     → تونل عمومی TURN + خودترمیم
+
+بعد از اجرا، آدرس عمومی سایت در این فایل نوشته می‌شود:
+    tunnel_url.txt
+
+═══════════════════════════════════════════════════════════════════
+  ۲) اجرای دستی (مرحله به مرحله)
+═══════════════════════════════════════════════════════════════════
+
+CMD را باز کن و این دستورها را به ترتیب بزن:
+
+    مرحله ۱ — دیتابیس:
+        "C:\xampp\mysql\bin\mysqld.exe" --standalone
+        (پنجره باز بماند)
+
+    مرحله ۲ — وب‌سرور (پنجره CMD جدید):
+        "C:\xampp\apache\bin\httpd.exe"
+
+    مرحله ۳ — سرورهای Node (پنجره CMD جدید):
+        cd C:\xampp\htdocs\black-meet
+        start "" node server.js
+        start "" node turn.js
+        start "" node turn-proxy.js
+
+    مرحله ۴ — تونل‌های عمومی و مانیتورها (همان CMD):
+        start "" powershell -NoLogo -WindowStyle Hidden -File keep-tunnel.ps1
+        start "" powershell -NoLogo -WindowStyle Hidden -File keep-bore.ps1
+
+═══════════════════════════════════════════════════════════════════
+  ۳) آدرس‌های سایت
+═══════════════════════════════════════════════════════════════════
+
+    • آدرس محلی (روی همین کامپیوتر):
+        http://localhost/black-meet/
+
+    • آدرس عمومی (برای دوستان از اینترنت):
+        محتوای فایل tunnel_url.txt را باز کن و لینک را کپی کن.
+        مثال: https://xxxxxxxxxxxx.lhr.life/black-meet/
+
+    ⚠ نکته مهم: آدرس عمومی در هر ری‌استارت تونل «تغییر می‌کند»
+    (سرویس رایگان localhost.run این‌طور است). ولی لازم نیست نگران باشی:
+    خود سایت همیشه آخرین آدرس را از tunnel_url.txt می‌خواند، پس دکمه
+    «کپی لینک» در صفحه تماس همیشه آدرس درست را می‌دهد.
+
+    • اگر می‌خواهی آدرس عمومی برای همیشه ثابت بماند:
+      در سایت https://admin.localhost.run یک اکانت رایگان بساز و کلید
+      SSH این کامپیوتر را ثبت کن. کلید آماده است در:
+        C:\Users\BlackLine\.ssh\id_ed25519.pub
+
+═══════════════════════════════════════════════════════════════════
+  ۴) بررسی کامل سلامت (چک‌لیست)
+═══════════════════════════════════════════════════════════════════
+
+الف) پورت‌ها — در CMD این را بزن؛ باید ۴ خط ببینی:
+    netstat -ano | findstr "LISTENING" | findstr ":80 :3000 :3306 :3478"
+
+    :80    → Apache
+    :3306  → MySQL
+    :3000  → سرور سیگنالینگ
+    :3478  → TURN
+
+ب) سایت محلی — در مرورگر باز کن:
+    http://localhost/black-meet/     → باید صفحه ورود/خانه بیاید
+
+ج) سیگنالینگ — در مرورگر یا CMD:
+    http://localhost/socket.io/?EIO=4&transport=polling
+    باید شروع شود با:  0{"sid":...
+
+د) دیتابیس — اگر صفحه ورود بدون خطا باز شد یعنی دیتابیس وصل است.
+
+هـ) تونل عمومی — آدرس داخل tunnel_url.txt را در مرورگر باز کن.
+    اگر 503 داد چند ثانیه صبر کن؛ مانیتور خودش درستش می‌کند.
+
+═══════════════════════════════════════════════════════════════════
+  ۵) آخرین وضعیت بررسی‌شده (۱۴۰۵/۰۶/۲۳ — 2026-09-14)
+═══════════════════════════════════════════════════════════════════
+
+    ✅ Apache  (پورت 80)          → روشن، سایت محلی 200
+    ✅ MySQL   (پورت 3306)        → روشن، اتصال دیتابیس OK
+    ✅ سیگنالینگ (پورت 3000)      → روشن، 0{"sid": برمی‌گرداند
+    ✅ TURN     (پورت 3478)       → روشن
+    ✅ تونل عمومی سایت            → روشن (ssh.exe فعال)
+    ✅ سیگنالینگ از طریق تونل     → OK (0{"sid": از آدرس عمومی)
+    ✅ همه صفحات PHP              → 200 (index/home/profile/messages/
+                                     create/admin_members/call)
+    ⚠ تونل TURN عمومی (bore)     → غیرفعال: آنتی‌ویروس ویندوز
+      (Defender) فایل bore.exe را مدام پاک می‌کند.
+      ► در این حالت تماس‌ها از TURN عمومی رایگان
+        (openrelay.metered.ca) رد می‌شوند و تماس کار می‌کند.
+      ► برای فعال‌کردن دوباره: در Windows Security → Virus & threat
+        protection settings → Exclusions، پوشه زیر را استثنا کن:
+          C:\Users\BlackLine\Downloads\bore-tool
+        بعد دوباره start-all.bat را اجرا کن؛ مانیتور خودش وصل می‌شود.
+    ► آدرس عمومی فعلی: در فایل tunnel_url.txt
+
+═══════════════════════════════════════════════════════════════════
+  ۶) نصب اولیه دیتابیس (فقط بار اول)
+═══════════════════════════════════════════════════════════════════
+
+    ۱) phpMyAdmin را باز کن: http://localhost/phpmyadmin
+    ۲) دیتابیس جدید بساز به نام:  blackmeet
+       (Collation: utf8mb4_unicode_ci)
+    ۳) تب Import را بزن و این فایل را ایمپورت کن:
+        C:\xampp\htdocs\black-meet\sql\schema.sql
+    ۴) تنظیمات اتصال در فایل config.json است (root بدون رمز).
+
+═══════════════════════════════════════════════════════════════════
+  ۷) خاموش کردن کامل سایت
+═══════════════════════════════════════════════════════════════════
+
+در CMD این دستورها را بزن:
+
+    taskkill /F /IM httpd.exe /T
+    taskkill /F /IM mysqld.exe /T
+    taskkill /F /IM node.exe /T
+    taskkill /F /IM ssh.exe
+    taskkill /F /IM bore.exe
+
+یا Task Manager (Ctrl+Shift+Esc) → این پروسه‌ها را End Task کن:
+    httpd.exe ، mysqld.exe ، node.exe ، ssh.exe ، bore.exe
+
+═══════════════════════════════════════════════════════════════════
+  ۸) رفع اشکال (سؤالات رایج)
+═══════════════════════════════════════════════════════════════════
+
+    • «Access is denied» موقع اجرای mysqld یا httpd:
+      یعنی همان سرویس از قبل روشن است؛ خطا را نادیده بگیر.
+
+    • آدرس عمومی خطا 503 می‌دهد:
+      تونل تازه ری‌استارت شده؛ چند ثانیه صبر کن. مانیتور keep-tunnel
+      خودش درستش می‌کند. آخرین آدرس درست همیشه در tunnel_url.txt است.
+
+    • آدرس عمومی عوض شد و لینک قدیمی کار نمی‌کند:
+      طبیعی است. آدرس جدید در tunnel_url.txt است. لینک‌های قدیمی فقط
+      کد اتاق را از دست می‌دهند؛ کافی است کاربر کد را در صفحه «پیوستن
+      با لینک» وارد کند.
+
+    • تماس وصل نمی‌شود ولی سایت باز می‌شود:
+      ۱) بخش ۴ را چک کن (مخصوصاً سیگنالینگ 0{"sid":)
+      ۲) مطمئن شو هر سه برنامه Node اجرا هستند
+      ۳) اگر آدرس عمومی را از بیرون باز می‌کنی، سیگنالینگ باید از مسیر
+         تونل هم جواب بدهد (بخش ۴، بند ج از طریق آدرس عمومی)
+
+    • دکمه‌ها لودینگ گیر کرده‌اند:
+      نگران نباش؛ بعد از حداکثر ۶ ثانیه خودشان آزاد می‌شوند (failsafe).
+
+    • سایت کند است:
+      gzip و کش و OPcache فعال است؛ اگر کندی جدی بود، مرورگر را با
+      Ctrl+F5 رفرش کن تا فایل‌های کش قدیمی پاک شوند.
+
+═══════════════════════════════════════════════════════════════════
+  ۹) تاریخچه تغییرات روش اجرا (هر تغییر اینجا ثبت می‌شود)
+═══════════════════════════════════════════════════════════════════
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] اتصال دستگاه‌ها + سرعت
+    • آپاچی حالا /socket.io/ را به Node:3000 پروکسی می‌کند (انتهای
+      C:\xampp\apache\conf\httpd.conf) → سیگنالینگ از تونل عمومی هم
+      رد می‌شود؛ نیازی به باز کردن پورت اضافه نیست.
+    • Gzip + کش مرورگر در همان بخش httpd.conf فعال شد.
+    • PHP OPcache در C:\xampp\php\php.ini فعال شد.
+    • tunnel_url.txt منبع رسمی آدرس عمومی شد؛ سایت خودکار می‌خواند
+      (functions.php → public_url()).
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] انیمیشن‌های ارگانیک
+    • assets/js/interactions.js به همه صفحات اضافه شد: انیمیشن لودینگ
+      بین صفحات + لودینگ روی دکمه‌ها + حالت نرم (squishy) هاور/فشار.
+    • صفحه تماس از لودینگ دکمه‌ها مستثناست (دکمه‌های زنده میکروفون/
+      دوربین نباید قفل شوند)؛ انیمیشن‌های نرم آنجا هم فعال است.
+    • برای مستثنا کردن یک دکمه: کلاس bm-no-loader یا data-no-loader.
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] رفع مشکل «فقط یک دستگاه می‌توانست وارد لینک عمومی شود» | Fixed "only one device could open the public link"
+    فارسی:
+    • علت واقعی: localhost.run هنگام هر «اتصال دوباره‌ی داخلی»، اسم دامنه
+      (هاست‌نیم) تونل را عوض می‌کند ولی ssh روشن می‌ماند. اسکریپت قبلی فقط
+      بار اول لاگ را می‌خواند؛ پس tunnel_url.txt آدرسِ «مرده» را نگه
+      می‌داشت و همه با همان لینک قدیمی خطای 503 می‌گرفتند — انگار فقط
+      «یک دستگاه» (یا هیچ دستگاهی) می‌توانست وارد شود.
+    • تست انجام‌شده: با آدرس درست و زنده، ۱۰ دستگاه به‌صورت همزمان (200)
+      و ۵ هندشیک همزمان Socket.IO (200 + سشن معتبر) جواب گرفتند —
+      localhost.run محدودیتی برای چند دستگاه ندارد.
+    • اصلاح: اسکریپت keep-tunnel.ps1 حالا «هر ۱۰ ثانیه» لاگ ssh را دوباره
+      می‌خواند و هر هاست‌نیم جدید را بلافاصله در tunnel_url.txt ثبت
+      می‌کند؛ سلامتِ «همان آدرس ثبت‌شده» هم چک می‌شود و در خرابی، ssh ری
+      استارت می‌شود تا آدرس تازه ساخته شود.
+    • سایت همیشه آدرس را از tunnel_url.txt می‌خواند، پس لینک اشتراک‌گذاری
+      همیشه زنده است. (cloudflared هم به‌عنوان جایگزین در پوشه‌ی tools
+      دانلود شد ولی شبکه‌ی شما پورت‌های 7844/UDP آن را مسدود می‌کند؛
+      localhost.run در حال حاضر کافی و بهتر است.)
+    English:
+    • Root cause: localhost.run rotates the tunnel hostname on every
+      internal reconnect WHILE ssh stays alive. The old watchdog parsed
+      the log only once, so tunnel_url.txt kept a dead URL and everyone
+      got 503 — looking like "only one device can join".
+    • Tested: with the live URL, 10 simultaneous devices returned 200 and
+      5 parallel Socket.IO handshakes returned 200 with valid sessions —
+      localhost.run has no multi-device limit.
+    • Fix: keep-tunnel.ps1 now re-parses the ssh log every 10 seconds and
+      immediately records any new hostname into tunnel_url.txt; the
+      recorded URL itself is health-checked and ssh restarts on failure.
+    • The app always reads the URL from tunnel_url.txt, so share links
+      stay live. (cloudflared was downloaded to tools\ as an alternative,
+      but this network blocks its UDP 7844 edge ports; localhost.run is
+      currently sufficient and better.)
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] حذف کامل کد تایید از دیتابیس بعد از ورود | OTP fully deleted from DB after login
+    فارسی:
+    • قبلاً کد تایید (OTP) فقط با «هدف» (purpose) خودش حذف می‌شد و
+      کدهای منقضی برای همیشه در جدول verification_codes می‌ماندند
+      (در بررسی، یک کد منقضی از ۲۶ مرداد در دیتابیس بود!).
+    • حالا در api/verify_otp.php بعد از تایید موفق، «تمام» کدهای آن
+      شماره تلفن (هر هدفی) بلافاصله از دیتابیس حذف می‌شوند — کد هیچ‌وقت
+      قابل استفاده مجدد نیست.
+    • تایپ اشتباه کد، کد را حذف نمی‌کند (کاربر تا انقضا می‌تواند دوباره
+      تلاش کند)؛ فقط ورود موفق یا منقضی‌شدن، کد را پاک می‌کند.
+    • پاک‌سازی خودکار کدهای منقضی به همه‌ی مسیرهای تولید کد اضافه شد
+      (signup، login_phone، resend_otp) و در ابتدای verify هم اجرا
+      می‌شود — جدول همیشه تمیز می‌ماند.
+    • کد منقضی موجود در دیتابیس هم پاک شد (جدول اکنون خالی است).
+    English:
+    • Previously an OTP was deleted only for its own purpose, and
+      expired codes stayed in verification_codes forever (a stale
+      expired code from Aug 26 was found in the DB).
+    • Now api/verify_otp.php deletes ALL codes for that phone number
+      (any purpose) immediately after successful verification — a code
+      can never be reused after login.
+    • A wrong attempt does NOT delete the code (user can retry until
+      expiry); only successful login or expiry removes it.
+    • Expired-code housekeeping was added to every OTP-generating
+      endpoint (signup, login_phone, resend_otp) and to the start of
+      verify — the table always stays clean.
+    • The stale expired row was purged (table is now empty).
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] رفع ارور Remove-Item در keep-tunnel.ps1 | Fixed Remove-Item error in keep-tunnel.ps1
+    فارسی:
+    • مشکل: هنگام اجرای start-all.bat اسکریپت keep-tunnel.ps1 هر بار
+      ارور «Remove-Item: ... because it is being used by another process»
+      روی فایل ssh2.log چاپ می‌کرد.
+    • علت: چند تانل ssh یتیم از اجراهای قبلی باقی مانده بودند (۳ پروسه
+      ssh.exe همزمان!) که فایل لاگ را قفل کرده بودند؛ ضمناً هر دو نسخه
+      از لاگ مشترک استفاده می‌کردند.
+    • اصلاح: اسکریپت جدید در شروع، تانل‌های ssh یتیم را خودکار می‌بندد؛
+      با Mutex سراسری فقط اجازه‌ی «یک» نسخه می‌دهد؛ و هر تلاش لاگِ جدا
+      و زمان‌دار خودش را می‌نویسد (پس دیگر هیچ فایلی برای حذف کردن قفل
+      نمی‌شود و خط Remove-Item از ابتدای حلقه حذف شد).
+    • اگر ssh.exe هنگام exit قفل شود، اسکریپت به‌جای کرش، آن لاگ را رد
+      می‌کند و ادامه می‌دهد (SilentlyContinue).
+    • همین تغییر (stderr جدا + بی‌صدا بودن) روی keep-bore.ps1 هم اعمال شد.
+    English:
+    • Problem: on every start-all.bat run, keep-tunnel.ps1 printed
+      "Remove-Item ... being used by another process" for ssh2.log.
+    • Cause: orphaned ssh tunnels from previous runs (3 ssh.exe at once!)
+      kept the shared log locked.
+    • Fix: the watchdog now kills orphaned ssh tunnels at startup, uses a
+      global mutex (single instance only), and writes a unique timestamped
+      log per attempt — no shared file, no lock, and the Remove-Item call
+      is gone from the loop start entirely.
+    • If a log is still locked at cleanup time it is skipped silently.
+    • Same hardening (separate stderr + silent operation) applied to
+      keep-bore.ps1 as well.
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] رفع ارور تکراری PowerShell هنگام اجرای start-all.bat | Fixed repetitive PowerShell error when running start-all.bat
+    فارسی:
+    • مشکل: اسکریپت keep-bore.ps1 هر ~۹ ثانیه دو ارور
+      «Start-Process: The system cannot find the file specified» و
+      «You cannot call a method on a null-valued expression» چاپ می‌کرد.
+    • علت: آنتی‌ویروس ویندوز (Defender) فایل bore.exe را پاک می‌کند و
+      حلقه‌ی بی‌نهایت اسکریپت مدام سعی می‌کرد فایل ناموجود را اجرا کند؛
+      ضمناً دو نسخه‌ی تکراری از این اسکریپت همزمان اجرا شده بودند.
+    • اصلاح: اسکریپت جدید کاملاً «بی‌صدا» است — اگر bore.exe موجود
+      نباشد، اول سعی می‌کند از فایل zip موجود خودش را بازسازی کند و اگر
+      نشد، بدون هیچ پیام خطایی هر ۲ دقیقه دوباره تلاش می‌کند.
+    • یک Mutex سراسری اضافه شد تا فقط «یک» نسخه از این اسکریپت اجرا شود
+      (دیگر نسخه‌های تکراری ساخته نمی‌شوند).
+    • نتیجه: اجرای start-all.bat هیچ ارور PowerShell نشان نمی‌دهد.
+    • برای فعال‌کردن تونل TURN اختصاصی: مسیر Downloads\bore-tool را در
+      Windows Security → Virus & threat protection → Exclusions اضافه
+      کنید؛ اسکریپت خودش bore.exe را برمی‌گرداند و وصل می‌شود.
+    English:
+    • Problem: keep-bore.ps1 printed two PowerShell errors every ~9s
+      because Windows Defender deletes bore.exe while the loop kept
+      trying to launch it; two duplicate watchdog instances also ran.
+    • Fix: the watchdog is now fully silent — it quietly re-extracts
+      bore.exe from the local zip when missing, and if that fails it
+      retries every 120s without printing anything.
+    • A global mutex now guarantees only ONE watchdog instance runs.
+    • Result: starting with start-all.bat shows no PowerShell errors.
+    • To re-enable your own TURN relay: add Downloads\bore-tool to
+      Defender exclusions; the watchdog restores bore.exe and connects.
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] موبایل صفحه تماس: دکمه اشتراک لینک + سایدبار
+    فارسی:
+    • دکمه «کپی لینک» حالا در موبایل هم دیده می‌شود (فقط آیکون؛ متن
+      در موبایل مخفی است تا جا نگیرد).
+    • شمارنده اعضا و وضعیت اتصال زنده در موبایل به‌صورت فشرده نمایش
+      داده می‌شود (نقطه سبز/قرمز + عدد).
+    • سایدبار (اعضا/چت/ادمین) حالا با «یک دکمه» باز و بسته می‌شود —
+      در موبایل به‌صورت کشویی روی ویدیو با پس‌زمینه تیره، و در دسکتاپ
+      هم می‌تواند جمع شود تا ویدیو تمام‌عرض شود. دکمه فعال هنگام باز
+      بودن هایلایت می‌شود؛ در ابتدای ورود در دسکتاپ باز و در موبایل
+      بسته است.
+
+    English:
+    • The “copy link” button is now visible on mobile too (icon only;
+      the label hides on small screens to save space).
+    • Participant count + live connection dot now show in a compact
+      pill on mobile.
+    • The sidebar (members/chat/admin) now opens and closes with one
+      button — slides over the video with a dark backdrop on mobile,
+      and can also collapse on desktop for full-width video. The
+      toggle button highlights while open; on load it starts open on
+      desktop and closed on mobile.
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] رفع ارور auth.php (سشن/ریدایرکت)
+    فارسی:
+    • مشکل: هشدار «session_start(): Session cannot be started after
+      headers have already been sent» + کار نکردن ریدایرکت ورود.
+    • علت ۱: صفحات اول head.php را include می‌کردند (خروجی HTML) و
+      بعد auth.php را؛ سشن بعد از خروجی استارت می‌شد.
+    • اصلاح ۱: ترتیب include عوض شد؛ حالا auth.php قبل از head.php و
+      require_login() قبل از هر خروجی اجرا می‌شود (در ۷ صفحه).
+    • علت ۲: BOM مخفی (EF BB BF) در ابتدای partials/head.php و
+      call.php که خروجی ناخواسته تولید می‌کرد؛ حذف شد.
+    • اصلاح ۲: auth.php حالا با headers_sent() محافظت می‌شود و
+      require_login() در حالت عقب‌افتاده با location.replace ریدایرکت
+      می‌کند.
+    • اصلاح ۳: api/announcements.php حالا 401 JSON می‌دهد نه 302.
+    • نتیجه: هر ۸ صفحه صفر خطا؛ ریدایرکت مهمان‌ها 302 درست؛ صفحه تماس
+      با اتاق واقعی 200 بدون خطا.
+
+    English:
+    • Problem: “Session cannot be started after headers already sent”
+      warnings + broken login redirects.
+    • Cause 1: pages included head.php (prints HTML) before auth.php.
+    • Fix 1: auth.php now loads before head.php and require_login()
+      runs before any output in all 7 pages.
+    • Cause 2: hidden UTF-8 BOM at the start of head.php and call.php
+      emitted invisible output; removed.
+    • Fix 2: auth.php guards session_start with headers_sent() and
+      require_login() falls back to location.replace redirect.
+    • Fix 3: api/announcements.php returns 401 JSON instead of 302.
+    • Result: all 8 pages render zero warnings; guest redirects work
+      (302); call page with a real room returns 200 clean.
+
+[۱۴۰۵/۰۶/۲۳ — 2026-09-14] سایت کاملاً زنده (بدون رفرش)
+    • assets/js/live.js به همه صفحات اضافه شد: یک اتصال زنده همیشگی
+      با ری‌کانکت خودکار.
+    • صفحه تماس: درخواست ورود کاربران «همان لحظه» و بدون رفرش برای
+      ادمین نمایش داده می‌شود (کارت + صدا + پیام).
+    • نشانگر وضعیت اتصال زنده (سبز/قرمز) در نوار بالای صفحه تماس.
+    • خانه و پیام‌ها: اعلان‌های مدیر بلافاصله در همه صفحه‌های باز ظاهر
+      می‌شوند (کانال bm:announcements + مسیر داخلی POST /__broadcast
+      روی سرور Node برای push از سمت PHP).
+    • اگر اتصال زنده قطع شود، polling قدیمی به‌عنوان پشتیبان کار می‌کند.
+
+═══════════════════════════════════════════════════════════════════
+  English summary (کوتاه)
+═══════════════════════════════════════════════════════════════════
+
+  START:   double-click start-all.bat (starts Apache, MySQL, 3 Node
+           servers, tunnels + watchdogs).
+  URLS:    local = http://localhost/black-meet/  |  public = see
+           tunnel_url.txt (changes on tunnel restart; the app reads
+           it automatically so in-app share links are always correct).
+  HEALTH:  netstat -ano | findstr "LISTENING" | findstr ":80 :3000 :3306 :3478"
+           + signaling test /socket.io/?EIO=4&transport=polling must
+           start with 0{"sid":
+  STATUS (2026-09-14): all services UP, DB OK, all pages 200, tunnel
+           + remote signaling OK. bore TURN tunnel is OFF because
+           Windows Defender deletes bore.exe — calls still work via
+           the openrelay.metered.ca public TURN fallback. To restore:
+           whitelist C:\Users\BlackLine\Downloads\bore-tool in
+           Windows Security exclusions and re-run start-all.bat.
+  STOP:    taskkill /F /IM httpd.exe /T & mysqld.exe & node.exe & ssh.exe & bore.exe
+  DB SETUP (first time): create DB blackmeet (utf8mb4_unicode_ci),
+           import sql\schema.sql via phpMyAdmin. Config: config.json.
+  CHANGE LOG: see section 9 above (Persian) — Apache /socket.io proxy,
+           gzip+cache+OPcache, tunnel_url.txt auto-read, organic
+           animations, fully-live site (no refresh needed anywhere).
+
+═══════════════════════════════════════════════════════════════════
+  خلاصه یک‌خطی:  دابل‌کلیک start-all.bat → آدرس عمومی در tunnel_url.txt
+  One line:      double-click start-all.bat → public URL in tunnel_url.txt
+═══════════════════════════════════════════════════════════════════
