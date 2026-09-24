@@ -2,8 +2,8 @@
 # Double-click tunnel.cmd to launch this. Close the window to stop the tunnels.
 $root = 'C:\xampp\htdocs\black-meet'
 
-# Spawn the two watchers as children of THIS visible window's session.
-Start-Process powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "$root\keep-tunnel.ps1"
+# Website tunnel with automatic fallback (cloudflare -> ssh -> bore) + TURN relay.
+Start-Process powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "$root\keep-tunnel-chain.ps1"
 Start-Process powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File "$root\keep-bore.ps1"
 
 Write-Host "============================================================="

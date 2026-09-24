@@ -1,9 +1,11 @@
-# Dependencies
+    # Dependencies
 node_modules/
 
 # Sensitive config
 config.json
 .env
+.env.*
+!.env.example
 
 # Uploaded files
 uploads/*
@@ -14,6 +16,14 @@ uploads/*
 *.tmp
 *.swp
 node.err
+
+config.local.json
+config.production.json
+
+turn_host.txt
+tunnel_url.txt
+dev_otp.log
+node.log
 
 # OS files
 .DS_Store
@@ -40,3 +50,15 @@ ssh-*.log
 
 # Tools (large binaries)
 tools/cloudflared.exe
+bin/cloudflared.exe
+
+# SQLite database (Node version)
+black_meet.db
+black_meet.db-*
+*.db-journal
+
+# Smoke-test artifacts
+node-smoke.*
+
+# One-shot MySQL snapshot (import tool)
+tools/mysql_dump/

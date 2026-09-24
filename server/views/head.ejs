@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html class="dark" dir="rtl" lang="fa">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title><%- esc(title) %></title>
+<link rel="stylesheet" href="<%- asset('fonts/material-symbols-outlined.css') %>"/>
+<link rel="stylesheet" href="<%- asset('assets/css/styles.css') %>" media="print" onload="this.media='all'"/>
+<noscript><link rel="stylesheet" href="<%- asset('assets/css/styles.css') %>"/></noscript>
+<link rel="stylesheet" href="<%- asset('assets/css/tailwind.css') %>"/>
+<script>window.__BM_SKIP_BUTTON_LOADER = (window.__BM_SKIP_BUTTON_LOADER || []);window.__BM_LIVE_URL = '';<% if (typeof pageName !== 'undefined' && pageName === 'call') { %>window.__BM_SKIP_BUTTON_LOADER.push('call');<% } %></script>
+<script src="/socket.io/socket.io.js"></script>
+<script src="<%- asset('shared/socket-events.js') %>"></script>
+<script src="<%- asset('assets/js/live.js') %>"></script>
+<script src="<%- asset('assets/js/interactions.js') %>"></script>

@@ -1,7 +1,27 @@
 ﻿/* ===== Black Meet - custom styles ===== */
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../fonts/Vazirmatn-Regular.woff2') format('woff2');
+  font-weight: 400; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../fonts/Vazirmatn-Medium.woff2') format('woff2');
+  font-weight: 500; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../fonts/Vazirmatn-SemiBold.woff2') format('woff2');
+  font-weight: 600; font-style: normal; font-display: swap;
+}
+@font-face {
+  font-family: 'Vazirmatn';
+  src: url('../fonts/Vazirmatn-Bold.woff2') format('woff2');
+  font-weight: 700; font-style: normal; font-display: swap;
+}
 :root { color-scheme: dark; }
 body { font-family: 'Vazirmatn','Tahoma','Arial',sans-serif; }
-.font-fa { font-family: 'Vazirmatn','Afsaneh',sans-serif; }
+.font-fa { font-family: 'Vazirmatn','Tahoma',sans-serif; }
 
 /* Glassmorphism */
 .glass-panel {
@@ -147,9 +167,17 @@ body { font-family: 'Vazirmatn','Tahoma','Arial',sans-serif; }
   .bm-soft:hover, .bm-soft:active { transform: none; }
 }
 
-/* --- Loading state for buttons: content pulses softly + tiny spinner dot --- */
+/* --- Loading state for buttons: content subtly blurs + tiny spinner dot --- */
 .bm-loading { pointer-events: none; position: relative; }
-.bm-loading > *:not(.bm-btn-dot) { opacity: .35; transition: opacity .2s ease; }
+.bm-loading > *:not(.bm-btn-dot) {
+  opacity: .55;
+  filter: blur(3px);
+  transition: opacity .2s ease, filter .2s ease;
+}
+button:not(.bm-soft) > *, .btn-primary > *, .btn-secondary > *,
+.bm-loading > *:not(.bm-btn-dot) {
+  transition: opacity .2s ease, filter .2s ease;
+}
 .bm-loading::after {
   content: '';
   position: absolute;

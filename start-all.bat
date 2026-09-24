@@ -4,47 +4,25 @@ color 0A
 
 echo.
 echo  ==========================================
-echo     Black Meet - Starting All Services
+echo     Black Meet (Node) - Starting Services
 echo  ==========================================
 echo.
 
-REM === Apache ===
-echo [1/7] Apache (port 80^)...
-netstat -an | findstr ":80 " | findstr "LISTEN" >nul 2>&1
-if %errorlevel%==0 (
-    echo       Already running
-) else (
-    start "Apache" "C:\xampp\apache\bin\httpd.exe"
-    timeout /t 3 /nobreak >nul
-    echo       Started
-)
-
-REM === MySQL ===
-echo [2/7] MySQL (port 3306^)...
-netstat -an | findstr ":3306 " | findstr "LISTEN" >nul 2>&1
-if %errorlevel%==0 (
-    echo       Already running
-) else (
-    start "MySQL" "C:\xampp\mysql\bin\mysqld.exe" --standalone
-    timeout /t 3 /nobreak >nul
-    echo       Started
-)
-
-REM === Node Signaling Server ===
-echo [3/7] Node signaling (port 3000^)...
+REM === Node App (web + REST + Socket.IO + SQLite) ===
+echo [1/5] Node app (port 3000^)...
 netstat -an | findstr ":3000" | findstr "LISTEN" >nul 2>&1
 if %errorlevel%==0 (
     echo       Already running
 ) else (
     cd /d C:\xampp\htdocs\black-meet
-    start "Node-Signal" node server.js
+    start "Node-App" node server/index.js
     timeout /t 3 /nobreak >nul
     echo       Started
 )
 
-REM === TURN Server ===
-echo [4/7] TURN server (port 3478^)...
-netstat -an | findstr ":3478" | findstr "LISTEN" >nul 2>&1
+REM === TURN Server (UDP 3478) ===
+echo [2/5] TURN server (UDP 3478^)...
+netstat -an | findstr ":3478" | findstr "UDP" >nul 2>&1
 if %errorlevel%==0 (
     echo       Already running
 ) else (
@@ -54,8 +32,8 @@ if %errorlevel%==0 (
     echo       Started
 )
 
-REM === TCP Proxy ===
-echo [5/7] TCP proxy (port 3478^)...
+REM === TCP Proxy (TCP 3478) ===
+echo [3/5] TCP proxy (TCP 3478^)...
 netstat -an | findstr ":3478" | findstr "TCP" | findstr "LISTEN" >nul 2>&1
 if %errorlevel%==0 (
     echo       Already running
@@ -66,21 +44,21 @@ if %errorlevel%==0 (
     echo       Started
 )
 
-REM === SSH Tunnel ===
-echo [6/7] Website tunnel...
-tasklist | findstr "ssh.exe" >nul 2>&1
+REM === Web Tunnel (cloudflare -> ssh -> bore) ===
+echo [4/5] Website tunnel (cloudflare -^> ssh -^> bore^)...
+tasklist | findstr /I "ssh.exe cloudflared.exe bore.exe" >nul 2>&1
 if %errorlevel%==0 (
     echo       Already running
 ) else (
     cd /d C:\xampp\htdocs\black-meet
-    start "Tunnel" powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File keep-tunnel.ps1
+    start "Tunnel" powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File keep-tunnel-chain.ps1
     timeout /t 5 /nobreak >nul
     echo       Started
 )
 
-REM === Bore Tunnel ===
-echo [7/7] TURN tunnel (bore^)...
-if exist "C:\Users\BLACKL~1\AppData\Local\Temp\opencode\bore\bore.exe" (
+REM === TURN Relay Tunnel (bore) ===
+echo [5/5] TURN relay tunnel (bore^)...
+if exist "C:\Users\BlackLine\Downloads\bore-tool\bore.exe" (
     cd /d C:\xampp\htdocs\black-meet
     start "Bore" powershell -WindowStyle Hidden -ExecutionPolicy Bypass -File keep-bore.ps1
     timeout /t 3 /nobreak >nul
@@ -101,28 +79,36 @@ echo              SERVICE STATUS
 echo  ==========================================
 echo.
 
-REM Check Apache
-netstat -an | findstr ":80 " | findstr "LISTEN" >nul 2>&1
-if %errorlevel%==0 (echo  [OK] Apache        :80) else (echo  [OFF] Apache       :80)
-
-REM Check MySQL
-netstat -an | findstr ":3306 " | findstr "LISTEN" >nul 2>&1
-if %errorlevel%==0 (echo  [OK] MySQL         :3306) else (echo  [OFF] MySQL        :3306)
-
-REM Check Node
+REM Check Node app
 netstat -an | findstr ":3000" | findstr "LISTEN" >nul 2>&1
-if %errorlevel%==0 (echo  [OK] Node          :3000) else (echo  [OFF] Node         :3000)
+if %errorlevel%==0 (echo  [OK] Node App    :3000) else (echo  [OFF] Node App   :3000)
 
-REM Check SSH
-tasklist | findstr "ssh.exe" >nul 2>&1
-if %errorlevel%==0 (echo  [OK] SSH Tunnel    active) else (echo  [OFF] SSH Tunnel   DOWN)
+REM Check TURN
+netstat -an | findstr ":3478" | findstr "UDP" >nul 2>&1
+if %errorlevel%==0 (echo  [OK] TURN        UDP:3478) else (echo  [OFF] TURN       UDP:3478)
+
+REM Check TCP proxy
+netstat -an | findstr ":3478" | findstr "TCP" | findstr "LISTEN" >nul 2>&1
+if %errorlevel%==0 (echo  [OK] TCP proxy    TCP:3478) else (echo  [OFF] TCP proxy   TCP:3478)
+
+REM Check Website Tunnel
+tasklist | findstr /I "ssh.exe cloudflared.exe bore.exe" >nul 2>&1
+if %errorlevel%==0 (echo  [OK] Website Tunnel active) else (echo  [OFF] Website Tunnel DOWN)
 
 echo.
 if exist C:\xampp\htdocs\black-meet\tunnel_url.txt (
     set /p URL=<C:\xampp\htdocs\black-meet\tunnel_url.txt
     echo  Website: %URL%
 )
+if exist C:\xampp\htdocs\black-meet\turn_host.txt (
+    set /p TH=<C:\xampp\htdocs\black-meet\turn_host.txt
+    echo  TURN:   turn://%TH%
+)
 
+echo.
+echo  NOTE: Apache/MySQL no longer needed. The app is served ONLY
+echo  by Node :3000. Start XAMPP separately if you still want
+echo  phpMyAdmin for the old MySQL data.
 echo.
 echo  ==========================================
 echo    Press any key to exit...
