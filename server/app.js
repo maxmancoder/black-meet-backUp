@@ -33,7 +33,7 @@ function createApp() {
   app.use('/black-meet/api', api);
   app.use('/black-meet', pages);
 
-  app.get(['/black-meet', '/black-meet/'], (req, res) => res.redirect(307, '/black-meet/index.php'));
+  app.get(['/black-meet', '/black-meet/'], (req, res) => res.redirect(307, '/black-meet/login'));
   app.get('/', (req, res) => res.redirect(301, '/black-meet/'));
 
   app.use((req, res) => {

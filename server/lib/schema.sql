@@ -36,9 +36,10 @@ CREATE TABLE IF NOT EXISTS meetings (
   id         INTEGER PRIMARY KEY AUTOINCREMENT,
   room_id    TEXT    NOT NULL,
   title      TEXT    NOT NULL,
-  creator_id INTEGER NOT NULL,
-  active     INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT    NOT NULL
+  creator_id     INTEGER NOT NULL,
+  active         INTEGER NOT NULL DEFAULT 1,
+  default_media  INTEGER NOT NULL DEFAULT 1,
+  created_at     TEXT    NOT NULL
 );
 CREATE UNIQUE INDEX IF NOT EXISTS uq_meetings_room_id ON meetings (room_id);
 CREATE INDEX IF NOT EXISTS idx_meetings_creator ON meetings (creator_id);

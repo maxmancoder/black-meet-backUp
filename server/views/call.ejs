@@ -5,7 +5,7 @@
 <!-- Top bar -->
 <header class="fixed top-0 w-full z-50 flex justify-between items-center px-3 sm:px-grid-margin py-md bg-background/80 backdrop-blur-xl shadow-md border-b border-white/5">
     <div class="flex items-center gap-2 sm:gap-md min-w-0">
-        <a href="<%- url('home.php') %>" class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined">arrow_forward</span></a>
+        <a href="<%- url('home') %>" class="text-on-surface-variant hover:text-primary"><span class="material-symbols-outlined">arrow_forward</span></a>
         <span class="font-bold tracking-tight text-primary text-lg sm:font-display-md sm:text-display-md" dir="ltr">Black Meet</span>
         <span class="hidden md:inline text-on-surface-variant">/</span>
         <span id="meeting-title" class="hidden md:inline font-headline-md text-headline-md text-on-surface truncate"><%- esc(meeting.title) %></span>
@@ -20,13 +20,13 @@
             <span class="hidden sm:inline">کپی لینک</span>
         </button>
         <div class="hidden sm:flex items-center gap-1 bg-surface-container-highest px-3 py-2 rounded-full" title="وضعیت اتصال زنده">
-            <span id="conn-state" class="w-2 h-2 rounded-full bg-secondary"></span>
+            <span class="conn-state w-2 h-2 rounded-full bg-secondary"></span>
             <span class="material-symbols-outlined text-[18px] text-secondary">groups</span>
-            <span id="participant-count" class="font-label-sm text-on-surface"><%- participants.length %></span>
+            <span class="participant-count font-label-sm text-on-surface"><%- participants.length %></span>
         </div>
         <div class="sm:hidden flex items-center bg-surface-container-highest px-2.5 py-2 rounded-full" title="وضعیت اتصال زنده">
-            <span id="conn-state" class="w-2 h-2 rounded-full bg-secondary"></span>
-            <span id="participant-count" class="font-label-sm text-on-surface mr-1"><%- participants.length %></span>
+            <span class="conn-state w-2 h-2 rounded-full bg-secondary"></span>
+            <span class="participant-count font-label-sm text-on-surface mr-1"><%- participants.length %></span>
         </div>
         <div class="w-9 h-9 sm:w-10 sm:h-10 rounded-full flex items-center justify-center font-headline-md text-white" style="background:<%- esc(me.avatar_color) %>"><%- esc(initials) %></div>
     </div>
@@ -38,7 +38,7 @@
 
 <div class="flex flex-1 pt-[64px] sm:pt-[76px] h-full relative">
     <!-- Sidebar -->
-    <aside id="call-sidebar" class="fixed md:relative left-0 top-[64px] sm:top-[76px] md:top-0 bottom-0 md:h-full w-[85%] max-w-[320px] md:w-80 lg:w-96 md:max-w-none z-40 flex-shrink-0 bg-surface-container-low border-l border-outline-variant/20 flex flex-col shadow-xl transform -translate-x-full transition-transform duration-300">
+    <aside id="call-sidebar" class="hidden fixed md:relative left-0 top-[64px] sm:top-[76px] md:top-0 bottom-0 md:h-full w-[85%] max-w-[320px] md:w-80 lg:w-96 md:max-w-none z-40 flex-shrink-0 bg-surface-container-low border-l border-outline-variant/20 flex flex-col shadow-xl">
         <div class="flex border-b border-outline-variant/20 px-sm pt-sm">
             <button class="flex-1 pb-3 text-center font-label-md text-primary border-b-2 border-primary transition-colors rounded-t-lg" id="tab-members" onclick="switchTab('members')">اعضا</button>
             <button class="flex-1 pb-3 text-center font-label-md text-on-surface-variant border-b-2 border-transparent transition-colors hover:text-on-surface rounded-t-lg" id="tab-chat" onclick="switchTab('chat')">چت</button>
@@ -121,6 +121,23 @@
     <div class="grid grid-cols-6 gap-2" id="emoji-grid"></div>
 </div>
 
+<!-- Member info panel (glowing steel boxes) -->
+<div id="member-info" class="hidden fixed inset-0 z-[80] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
+    <div class="glass-panel rounded-2xl p-xl shadow-2xl w-full max-w-[560px]">
+        <div class="flex items-center justify-between mb-lg">
+            <div class="flex items-center gap-3 min-w-0">
+                <div id="mi-avatar" class="w-14 h-14 rounded-full overflow-hidden border border-white/20 flex-shrink-0 flex items-center justify-center font-headline-md text-white"></div>
+                <div class="min-w-0">
+                    <h3 id="mi-name" class="font-headline-md text-headline-md text-on-surface truncate"></h3>
+                    <p id="mi-sub" class="font-label-sm text-on-surface-variant text-[12px]"></p>
+                </div>
+            </div>
+            <button onclick="closeMemberInfo()" class="text-on-surface-variant hover:text-on-surface p-1"><span class="material-symbols-outlined">close</span></button>
+        </div>
+        <div id="mi-grid" class="grid grid-cols-1 sm:grid-cols-2 gap-3"></div>
+    </div>
+</div>
+
 <!-- Right-click member context menu -->
 <div id="member-menu" class="hidden fixed z-[70] glass-panel rounded-xl p-3 shadow-2xl w-56">
     <div class="font-label-md text-on-surface mb-3 truncate" id="member-menu-name"></div>
@@ -147,9 +164,8 @@
     const bd = document.getElementById('sidebar-backdrop');
     const btn = document.getElementById('btn-sidebar');
     const isMobile = window.innerWidth < 768;
-    const hidden = sb.classList.contains('-translate-x-full');
-    const show = force !== undefined ? force : hidden;
-    sb.classList.toggle('-translate-x-full', !show);
+    const show = force !== undefined ? force : sb.classList.contains('hidden');
+    sb.classList.toggle('hidden', !show);
     if (bd) bd.classList.toggle('hidden', !(show && isMobile));
     if (btn) {
       btn.classList.toggle('bg-secondary-container', show);

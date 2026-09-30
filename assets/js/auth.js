@@ -49,7 +49,7 @@
   }
 
   window.resendOtp = function () {
-    postJSON('api/resend_otp.php', { csrf, phone: currentPhone, purpose: currentPurpose })
+    postJSON('api/login/resend', { csrf, phone: currentPhone, purpose: currentPurpose })
       .then(d => {
         if (d.ok) {
           lastOtp = d.otp || '';
@@ -90,7 +90,7 @@
   window.loginPhone = function () {
     const phone = document.getElementById('lp-phone').value.trim();
     if (!phone) return showToast('شماره تلفن را وارد کنید');
-    postJSON('api/login_phone.php', { csrf, phone })
+    postJSON('api/login/phone', { csrf, phone })
       .then(d => {
         if (d.ok) {
           currentPhone = d.phone; currentPurpose = d.purpose; lastOtp = d.otp;
@@ -110,7 +110,7 @@
     };
     if (!data.full_name || !data.username || !data.email || !data.phone || !data.password)
       return showToast('تمام فیلدها را پر کنید');
-    postJSON('api/signup.php', data)
+    postJSON('api/signup', data)
       .then(d => {
         if (d.ok) {
           currentPhone = d.phone; currentPurpose = d.purpose; lastOtp = d.otp || '';
@@ -122,7 +122,7 @@
   window.verifyOtp = function () {
     const code = document.getElementById('otp-input').value.trim();
     if (!code) return showToast('کد تأیید را وارد کنید');
-    postJSON('api/verify_otp.php', { csrf, phone: currentPhone, code, purpose: currentPurpose })
+    postJSON('api/login/verify', { csrf, phone: currentPhone, code, purpose: currentPurpose })
       .then(d => {
         if (d.ok) { persistSession(); location.href = d.redirect; }
         else showToast(d.msg || 'خطا');
@@ -133,7 +133,7 @@
     const email = document.getElementById('le-email').value.trim();
     const password = document.getElementById('le-pass').value;
     if (!email || !password) return showToast('ایمیل و رمز عبور را وارد کنید');
-    postJSON('api/login_email.php', { csrf, email, password })
+    postJSON('api/login/email', { csrf, email, password })
       .then(d => {
         if (d.ok) { persistSession(); location.href = d.redirect; }
         else showToast(d.msg || 'خطا');

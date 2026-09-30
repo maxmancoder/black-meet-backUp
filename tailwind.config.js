@@ -3,9 +3,7 @@
 module.exports = {
   darkMode: 'class',
   content: [
-    './server/views/**/*.ejs',
-    './**/*.php',
-    './**/*.html',
+'./server/views/**/*.ejs',
     './assets/js/**/*.js',
     './shared/**/*.js',
   ],

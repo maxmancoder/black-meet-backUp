@@ -1,5 +1,5 @@
 'use strict';
-// tools/import_sqlite.js - loads tools/mysql_dump/*.jsonl (from dump_mysql.php)
+// tools/import_sqlite.js - loads tools/mysql_dump/*.jsonl (legacy MySQL dump)
 // into the SQLite DB. Boots the Node schema first, then INSERT OR REPLACE all
 // rows, keeping original ids so relations stay valid.
 const path = require('path');
@@ -12,7 +12,7 @@ const dbm = require(path.join(ROOT, 'server', 'lib', 'db'));
 if (!dbm.DB_PATH) throw new Error('no db path');
 const dumpDir = path.join(__dirname, 'mysql_dump');
 if (!fs.existsSync(dumpDir)) {
-  console.error('no dump dir: run tools/dump_mysql.php first');
+  console.error('no dump dir: mysql_dump/*.jsonl not found');
   process.exit(1);
 }
 

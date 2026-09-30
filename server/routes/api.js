@@ -60,7 +60,7 @@ const router = express.Router();
 // auth / OTP
 // ------------------------------------------------------------------
 
-router.post('/signup.php', (req, res) => {
+router.post('/signup', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!checkCsrf(req, res)) return;
   const full = String(req.body.full_name || '').trim();
@@ -100,7 +100,7 @@ router.post('/signup.php', (req, res) => {
   return ok(res, response);
 });
 
-router.post('/login_phone.php', (req, res) => {
+router.post('/login/phone', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!checkCsrf(req, res)) return;
   const phone = String(req.body.phone || '').trim();
@@ -122,7 +122,7 @@ router.post('/login_phone.php', (req, res) => {
   return ok(res, response);
 });
 
-router.post('/resend_otp.php', (req, res) => {
+router.post('/login/resend', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!checkCsrf(req, res)) return;
   const phone = String(req.body.phone || '').trim();
@@ -142,7 +142,7 @@ router.post('/resend_otp.php', (req, res) => {
   return ok(res, response);
 });
 
-router.post('/verify_otp.php', (req, res) => {
+router.post('/login/verify', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!checkCsrf(req, res)) return;
 
@@ -179,10 +179,10 @@ router.post('/verify_otp.php', (req, res) => {
   if (!user) return bad(res, { ok: false, msg: 'حساب یافت نشد' });
 
   sessions.establishLoginSession(req, res, user.id);
-  return ok(res, { ok: true, redirect: baseUrl(req) + '/home.php' });
+  return ok(res, { ok: true, redirect: baseUrl(req) + '/home' });
 });
 
-router.post('/login_email.php', (req, res) => {
+router.post('/login/email', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!checkCsrf(req, res)) return;
 
@@ -200,15 +200,15 @@ router.post('/login_email.php', (req, res) => {
   }
 
   sessions.establishLoginSession(req, res, user.id);
-  return ok(res, { ok: true, redirect: baseUrl(req) + '/home.php' });
+  return ok(res, { ok: true, redirect: baseUrl(req) + '/home' });
 });
 
-router.post('/logout.php', (req, res) => {
+router.post('/logout', (req, res) => {
   sessions.invalidate(req, res);
-  return ok(res, { ok: true, redirect: baseUrl(req) + '/index.php' });
+  return ok(res, { ok: true, redirect: baseUrl(req) + '/login' });
 });
 
-router.get('/socket_token.php', (req, res) => {
+router.get('/socket-token', (req, res) => {
   if (!requireLoginApi(req, res)) return;
   const me = sessions.currentUser(req);
   const token = makeSocketToken(me.id, 0);
@@ -219,7 +219,7 @@ router.get('/socket_token.php', (req, res) => {
 // meetings
 // ------------------------------------------------------------------
 
-router.post('/create_meeting.php', (req, res) => {
+router.post('/meetings/create', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!requireLoginApi(req, res)) return;
   if (!checkCsrf(req, res)) return;
@@ -233,8 +233,9 @@ router.post('/create_meeting.php', (req, res) => {
   }
 
   const roomId = generateRoomId();
-  const r = dbm.run('INSERT INTO meetings (room_id, title, creator_id, active, created_at) VALUES (?,?,?,1,?)',
-    [roomId, title, me.id, sqlNow()]);
+  const defaultMedia = String(req.body.default_media) === '0' ? 0 : 1;
+  const r = dbm.run('INSERT INTO meetings (room_id, title, creator_id, active, default_media, created_at) VALUES (?,?,?,1,?,?)',
+    [roomId, title, me.id, defaultMedia, sqlNow()]);
   dbm.run(
     'INSERT INTO meeting_participants (meeting_id, user_id, display_name, username, status, role, joined_at) VALUES (?,?,?,?,?,?,?)',
     [r.lastInsertRowid, me.id, me.display_name, me.username, 'approved', 'admin', sqlNow()]
@@ -243,12 +244,12 @@ router.post('/create_meeting.php', (req, res) => {
   return ok(res, {
     ok: true,
     room_id: roomId,
-    redirect: baseUrl(req) + '/call.php?room=' + roomId,
-    share_url: publicUrl(req) + '/call.php?room=' + roomId,
+    redirect: baseUrl(req) + '/meeting?room=' + roomId,
+    share_url: publicUrl(req) + '/meeting?room=' + roomId,
   });
 });
 
-router.get('/meeting_info.php', (req, res) => {
+router.get('/meetings/info', (req, res) => {
   const room = String(req.query.room || '').trim();
   if (room === '') return bad(res, { ok: false, msg: 'لینک نامعتبر' }, 404);
   const row = dbm.get('SELECT room_id, title FROM meetings WHERE room_id=? AND active=1', [room]);
@@ -256,7 +257,7 @@ router.get('/meeting_info.php', (req, res) => {
   return ok(res, { ok: true, room_id: row.room_id, title: row.title });
 });
 
-router.post('/save_message.php', (req, res) => {
+router.post('/meetings/message', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!requireLoginApi(req, res)) return;
   const body = String(req.body.body || '').trim();
@@ -275,7 +276,7 @@ router.post('/save_message.php', (req, res) => {
   return ok(res, { ok: true });
 });
 
-router.post('/save_emoji.php', (req, res) => {
+router.post('/meetings/emoji', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!requireLoginApi(req, res)) return;
   const emoji = String(req.body.emoji || '');
@@ -325,23 +326,23 @@ function memberActivity(req, res, action) {
   return ok(res, { ok: true });
 }
 
-router.post('/approve_member.php', (req, res) => {
+router.post('/meetings/approve', (req, res) => {
   const r = memberActivity(req, res, 'approved');
   if (r === null) return;
   return r;
 });
-router.post('/reject_member.php', (req, res) => {
+router.post('/meetings/reject', (req, res) => {
   const r = memberActivity(req, res, 'removed');
   if (r === null) return;
   return r;
 });
-router.post('/remove_member.php', (req, res) => {
+router.post('/meetings/remove', (req, res) => {
   const part = resolveTarget(req, res);
   if (!part) return;
   dbm.run('UPDATE meeting_participants SET status=? WHERE id=?', ['removed', part.id]);
   return ok(res, { ok: true, user_id: Number(part.user_id) });
 });
-router.post('/mute_member.php', (req, res) => {
+router.post('/meetings/mute', (req, res) => {
   const part = resolveTarget(req, res);
   if (!part) return;
   const muted = Number(req.body.muted != null ? req.body.muted : 1);
@@ -366,7 +367,7 @@ function resolveTarget(req, res) {
   return part;
 }
 
-router.post('/leave_meeting.php', (req, res) => {
+router.post('/meetings/leave', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!requireLoginApi(req, res)) return;
   const mid = Number(req.body.meeting_id || 0);
@@ -387,7 +388,7 @@ router.post('/leave_meeting.php', (req, res) => {
 // profile
 // ------------------------------------------------------------------
 
-router.post('/profile_update.php', (req, res) => {
+router.post('/profile/update', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!requireLoginApi(req, res)) return;
   if (!checkCsrf(req, res)) return;
@@ -407,7 +408,7 @@ const upload = multer({
   limits: { fileSize: 2 * 1024 * 1024 },
 });
 
-router.post('/upload_avatar.php', upload.single('avatar'), (req, res) => {
+router.post('/profile/avatar', upload.single('avatar'), (req, res) => {
   if (!requireLoginApi(req, res)) return;
   if (!checkCsrf(req, res)) return;
 
@@ -443,7 +444,7 @@ router.post('/upload_avatar.php', upload.single('avatar'), (req, res) => {
 // admin (manager only)
 // ------------------------------------------------------------------
 
-router.all('/admin_members.php', (req, res) => {
+router.all('/admin/members', (req, res) => {
   if (!requireLoginApi(req, res)) return;
   const me = sessions.currentUser(req);
   if (!me.is_manager) return bad(res, { ok: false, msg: 'دسترسی ندارید' }, 403);
@@ -484,7 +485,7 @@ router.all('/admin_members.php', (req, res) => {
   return ok(res, { ok: true, is_limited: !!lim.is_limited });
 });
 
-router.post('/admin_block.php', (req, res) => {
+router.post('/admin/block', (req, res) => {
   if (!checkMethod(req, res, 'POST')) return;
   if (!requireLoginApi(req, res)) return;
   if (!checkCsrf(req, res)) return;
@@ -506,7 +507,7 @@ router.post('/admin_block.php', (req, res) => {
   return ok(res, { ok: true });
 });
 
-router.all('/announcements.php', (req, res) => {
+router.all('/announcements', (req, res) => {
   if (!requireLoginApi(req, res)) return;
 
   if (req.method === 'GET') {
@@ -543,7 +544,7 @@ function findUserByIdentifier(identifier) {
   return dbm.get('SELECT id, username, display_name, avatar FROM users WHERE phone=?', [identifier]);
 }
 
-router.all('/pv_user.php', (req, res) => {
+router.all('/messages/user', (req, res) => {
   if (req.method === 'GET') {
     const identifier = String(req.query.identifier || '').trim();
     const u = findUserByIdentifier(identifier);
@@ -569,7 +570,7 @@ router.all('/pv_user.php', (req, res) => {
   return ok(res, { ok: true });
 });
 
-router.all('/pv_manager.php', (req, res) => {
+router.all('/messages/conversations', (req, res) => {
   if (!requireLoginApi(req, res)) return;
   const me = sessions.currentUser(req);
   if (!me.is_manager) return bad(res, { ok: false, msg: 'دسترسی ندارید' }, 403);
@@ -604,8 +605,98 @@ router.all('/pv_manager.php', (req, res) => {
 // compatibility endpoint: old signaling -> php-internal bridge (now in-process)
 // ------------------------------------------------------------------
 
-router.post('/internal.php', (req, res) => {
+router.post('/internal', (req, res) => {
   return out(res, { ok: false, error: 'NOW_IN_PROCESS' }, 501);
+});
+
+// ------------------------------------------------------------------
+// member profile detail for the call-page info panel
+// (only for two users who are together in an active meeting)
+// ------------------------------------------------------------------
+
+router.get('/members/:userId', (req, res) => {
+  if (!requireLoginApi(req, res)) return;
+  const me = sessions.currentUser(req);
+  const uid = Number(req.params.userId || 0);
+  if (uid === 0) return bad(res, { ok: false, msg: 'داده ناقص' });
+
+  const shared = dbm.get(
+    `SELECT 1 AS x FROM meetings m
+     WHERE m.active=1
+       AND EXISTS (SELECT 1 FROM meeting_participants a WHERE a.meeting_id=m.id AND a.user_id=? AND a.status<>'removed')
+       AND EXISTS (SELECT 1 FROM meeting_participants b WHERE b.meeting_id=m.id AND b.user_id=? AND b.status<>'removed')`,
+    [me.id, uid]
+  );
+  const selfInfo = me.id === uid;
+  if (!selfInfo && !shared) return bad(res, { ok: false, msg: 'دسترسی ندارید' }, 403);
+
+  const u = dbm.get(
+    'SELECT id, full_name, username, display_name, email, phone, is_manager, is_limited, avatar_color, avatar, password_hash FROM users WHERE id=?',
+    [uid]
+  );
+  if (!u) return bad(res, { ok: false, msg: 'کاربر یافت نشد' });
+
+  return ok(res, {
+    ok: true,
+    user: {
+      id: Number(u.id),
+      full_name: u.full_name,
+      username: u.username,
+      display_name: u.display_name,
+      email: u.email,
+      phone: u.phone,
+      is_manager: !!u.is_manager,
+      is_limited: !!u.is_limited,
+      avatar_color: u.avatar_color,
+      avatar: u.avatar,
+      has_password: !!(u.password_hash && String(u.password_hash) !== ''),
+    },
+  });
+});
+
+// ------------------------------------------------------------------
+// compatibility: legacy .php API URLs 308-redirect to the clean names
+// (GET requests keep their query string; cookie auth still applies)
+// ------------------------------------------------------------------
+
+const PH_TO_CLEAN = {
+  signup: '/signup',
+  login_phone: '/login/phone',
+  resend_otp: '/login/resend',
+  verify_otp: '/login/verify',
+  login_email: '/login/email',
+  logout: '/logout',
+  socket_token: '/socket-token',
+  create_meeting: '/meetings/create',
+  meeting_info: '/meetings/info',
+  save_message: '/meetings/message',
+  save_emoji: '/meetings/emoji',
+  approve_member: '/meetings/approve',
+  reject_member: '/meetings/reject',
+  remove_member: '/meetings/remove',
+  mute_member: '/meetings/mute',
+  leave_meeting: '/meetings/leave',
+  profile_update: '/profile/update',
+  upload_avatar: '/profile/avatar',
+  admin_block: '/admin/block',
+  admin_members: '/admin/members',
+  announcements: '/announcements',
+  pv_user: '/messages/user',
+  pv_manager: '/messages/conversations',
+  internal: '/internal',
+};
+
+router.use((req, res, next) => {
+  const m = /^\/([A-Za-z0-9_]+)\.php$/.exec(req.path);
+  if (m) {
+    const target = PH_TO_CLEAN[m[1].toLowerCase()];
+    if (target) {
+      const qi = req.url.indexOf('?');
+      const q = qi >= 0 ? req.url.slice(qi) : '';
+      return res.redirect(308, '/black-meet/api' + target + q);
+    }
+  }
+  return next();
 });
 
 module.exports = router;

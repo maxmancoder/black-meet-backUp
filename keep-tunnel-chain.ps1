@@ -1,13 +1,14 @@
 # keep-tunnel-chain.ps1 - website tunnel watchdog with automatic fallback.
-# Order:  Cloudflare (default) -> SSH (localhost.run) -> bore (bore.pub).
+# Order:  Cloudflare (default) -> SSH (localhost.run) -> SSH (serveo.net) -> bore (bore.pub).
 # The chain loops forever: if the active tunnel dies or fails health checks it
 # is killed and the next method is tried; after bore fails we loop back to
-# Cloudflare. Only ONE chain runs (global mutex).
+# Cloudflare. ONLY ONE chain runs (global mutex + sibling-kill on startup).
 # All methods forward to the Node app on 127.0.0.1:3000 (Apache is gone).
 #
 # tunnel_url.txt always holds the CURRENT public URL:
 #   cloudflare -> https://<sub>.trycloudflare.com/black-meet/
 #   ssh        -> https://<sub>.lhr.life/black-meet/
+#   ssh/serveo -> https://<sub>.serveousercontent.com/black-meet/
 #   bore       -> http://bore.pub:<port>/black-meet/
 
 $mutex = New-Object System.Threading.Mutex($false, 'Global\BMTunnelChain')
@@ -22,10 +23,30 @@ $bore1    = 'C:\Users\BlackLine\Downloads\bore-tool\bore.exe'
 $bore2    = Join-Path $tmpDir 'bore\bore.exe'
 $chainLog = Join-Path $tmpDir 'bmt-chain.log'
 $appPort  = 3000
+$browserOpened = $false
 
 function Log([string]$msg) {
     $line = "[{0}] {1}" -f (Get-Date -Format 'HH:mm:ss'), $msg
     try { Add-Content -LiteralPath $chainLog -Value $line -Encoding utf8 } catch {}
+}
+
+# Open the site in Chrome the FIRST time a public URL passes a health check.
+function Open-BrowserOnce([string]$u) {
+    if ($script:browserOpened) { return }
+    if (-not $u) { return }
+    $cands = @(
+        "$env:ProgramFiles\Google\Chrome\Application\chrome.exe",
+        "${env:ProgramFiles(x86)}\Google\Chrome\Application\chrome.exe",
+        "$env:LOCALAPPDATA\Google\Chrome\Application\chrome.exe"
+    )
+    $exe = $cands | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
+    if (-not $exe) {
+        $cmd = Get-Command chrome.exe -ErrorAction SilentlyContinue
+        if ($cmd) { $exe = $cmd.Source }
+    }
+    if ($exe) {
+        try { Start-Process -FilePath $exe -ArgumentList ($u.TrimEnd('/')); $script:browserOpened = $true; Log ('OPEN: chrome -> ' + $u) } catch {}
+    }
 }
 
 function Get-UrlFile { try { return (Get-Content $urlFile -Raw -ErrorAction Stop).Trim() } catch { return '' } }
@@ -34,10 +55,14 @@ function Clear-UrlFile { Set-UrlFile '' }
 
 function Test-Http([string]$u) {
     if (-not $u) { return $false }
-    try {
-        $r = Invoke-WebRequest -Uri ($u.TrimEnd('/') + '/index.php') -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
-        if ($r.StatusCode -eq 200) { return $true }
-    } catch {}
+    $base = $u.TrimEnd('/')
+    # stored URLs already end with /black-meet/ -> append /login; tolerate bare-host URLs too
+    foreach ($tail in @('/login', '/black-meet/login')) {
+        try {
+            $r = Invoke-WebRequest -Uri ($base + $tail) -UseBasicParsing -TimeoutSec 20 -ErrorAction Stop
+            if ($r.StatusCode -eq 200) { return $true }
+        } catch {}
+    }
     return $false
 }
 
@@ -81,7 +106,7 @@ function Start-CfTunnel {
     $fails = 0
     while (-not $p.HasExited -and $fails -lt 2) {
         Start-Sleep -Seconds 10
-        if (Test-Http (Get-UrlFile)) { $fails = 0 } else { $fails++ }
+        if (Test-Http (Get-UrlFile)) { $fails = 0; Open-BrowserOnce (Get-UrlFile) } else { $fails++ }
     }
     try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
     Clear-UrlFile
@@ -117,7 +142,7 @@ function Start-SshTunnel {
             $newUrl = "https://" + $h2 + "/black-meet/"
             if ((Get-UrlFile) -ne $newUrl) { Set-UrlFile $newUrl; Log ("SSH: URL " + $newUrl) }
         }
-        if (Test-Http (Get-UrlFile)) { $fails = 0 } else { $fails++ }
+        if (Test-Http (Get-UrlFile)) { $fails = 0; Open-BrowserOnce (Get-UrlFile) } else { $fails++ }
     }
     try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
     Clear-UrlFile
@@ -126,7 +151,48 @@ function Start-SshTunnel {
     return $false
 }
 
-# ---- method 3: bore raw-TCP tunnel (plain http website) ----
+# ---- method 3: serveo.net (plain-https via ssh, no app needed) ----
+function Start-ServeoTunnel {
+    $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+    $log = Join-Path $tmpDir ("serveo-" + $stamp + ".log")
+    if (Test-Path $log) { Remove-Item $log -Force -ErrorAction SilentlyContinue }
+    if (Test-Path ($log + '.err')) { Remove-Item ($log + '.err') -Force -ErrorAction SilentlyContinue }
+    Log 'SVEO: starting serveo.net tunnel (ssh fallback)'
+    $p = Start-Process -FilePath $ssh -PassThru -WindowStyle Hidden `
+            -ArgumentList '-N','-o','StrictHostKeyChecking=no','-o','ServerAliveInterval=20','-o','ServerAliveCountMax=3','-o','ExitOnForwardFailure=yes','-R',('80:localhost:' + $appPort),'serveo.net' `
+            -RedirectStandardOutput $log -RedirectStandardError ($log + '.err')
+    if ($null -eq $p) { Log 'SVEO: failed to launch ssh'; return $false }
+
+    $deadline = (Get-Date).AddSeconds(40)
+    $url2 = $null
+    while ((Get-Date) -lt $deadline -and -not $p.HasExited) {
+        Start-Sleep -Seconds 3
+        $url2 = Get-NewestHost $log 'Forwarding HTTP traffic from (https://[A-Za-z0-9.-]+\.serveousercontent\.com)'
+        if ($url2) { break }
+    }
+    if (-not $url2) {
+        Log 'SVEO: no public URL within 40s'
+        try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+        Clear-UrlFile
+        Start-Sleep -Seconds 2
+        return $false
+    }
+    Set-UrlFile ($url2 + "/black-meet/")
+    Log ("SVEO: URL " + $url2)
+
+    $fails = 0
+    while (-not $p.HasExited -and $fails -lt 2) {
+        Start-Sleep -Seconds 10
+        if (Test-Http (Get-UrlFile)) { $fails = 0; Open-BrowserOnce (Get-UrlFile) } else { $fails++ }
+    }
+    try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
+    Clear-UrlFile
+    Log 'SVEO: failed - switching to bore'
+    Start-Sleep -Seconds 2
+    return $false
+}
+
+# ---- method 4: bore raw-TCP tunnel (plain http website) ----
 function Start-BoreTunnel {
     $bore = $null
     if (Test-Path $bore1) { $bore = $bore1 } elseif (Test-Path $bore2) { $bore = $bore2 }
@@ -160,7 +226,7 @@ function Start-BoreTunnel {
     $fails = 0
     while (-not $p.HasExited -and $fails -lt 2) {
         Start-Sleep -Seconds 10
-        if (Test-Http (Get-UrlFile)) { $fails = 0 } else { $fails++ }
+        if (Test-Http (Get-UrlFile)) { $fails = 0; Open-BrowserOnce (Get-UrlFile) } else { $fails++ }
     }
     try { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue } catch {}
     Clear-UrlFile
@@ -170,8 +236,14 @@ function Start-BoreTunnel {
 }
 
 # ---- startup cleanup: make sure we own the website tunnel ----
-# kill the OLD ssh watchdog + its ssh, and any leftover cloudflared quick tunnels.
+# kill OTHER keep-tunnel-chain instances (keep exactly one chain alive),
+# any old ssh watchdog + its ssh, and any leftover cloudflared quick tunnels.
 # (do NOT touch bore running for TURN via keep-bore.ps1 - that one is port 3478)
+try {
+    Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+        Where-Object { $_.CommandLine -match 'keep-tunnel-chain\.ps1' -and $_.ProcessId -ne $PID } |
+        ForEach-Object { try { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } catch {} }
+} catch {}
 try {
     Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
         Where-Object { $_.CommandLine -match 'keep-tunnel\.ps1' } |
@@ -189,12 +261,13 @@ try {
 } catch {}
 
 Clear-UrlFile
-Log '=== chain started: cloudflare -> ssh -> bore ==='
+Log '=== chain started: cloudflare -> localhost.run -> serveo -> bore ==='
 
 # ---- main chain ----
 while ($true) {
     if (Test-Path $cfExe) { Start-CfTunnel } else { Log 'CF : bin\cloudflared.exe missing - skipping' }
     Start-SshTunnel
+    Start-ServeoTunnel
     Start-BoreTunnel
     Start-Sleep -Seconds 10
 }

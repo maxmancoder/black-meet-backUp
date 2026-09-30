@@ -18,14 +18,14 @@
         </div>
     </div>
     <ul class="flex-1 space-y-2 font-body-md text-body-md">
-        <li><a class="flex items-center gap-4 py-3 px-4 bg-primary-container text-on-primary-container rounded-lg mx-2" href="<%- url('home.php') %>">
+        <li><a class="flex items-center gap-4 py-3 px-4 bg-primary-container text-on-primary-container rounded-lg mx-2" href="<%- url('home') %>">
             <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">video_library</span> تماس‌ها</a></li>
-        <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="<%- url('profile.php') %>">
+        <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="<%- url('profile') %>">
             <span class="material-symbols-outlined">person</span> پروفایل</a></li>
         <% if (isManager) { %>
-        <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="<%- url('messages.php') %>">
+        <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="<%- url('messages') %>">
             <span class="material-symbols-outlined">forum</span> پیام‌ها</a></li>
-        <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="<%- url('admin_members.php') %>">
+        <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="<%- url('members') %>">
             <span class="material-symbols-outlined">group_off</span> مدیریت اعضا</a></li>
         <% } %>
         <li><a class="flex items-center gap-4 py-3 px-4 text-on-surface-variant hover:bg-surface-container-high rounded-lg mx-2 transition-all" href="#" onclick="logout(event)">
@@ -38,14 +38,14 @@
     <!-- Top bar -->
     <header class="bg-background/80 backdrop-blur-md fixed top-0 w-full z-50 flex items-center justify-between px-lg py-md">
         <div class="flex items-center gap-3">
-            <a href="<%- url('home.php') %>"><span class="font-display-md text-display-md font-bold text-primary">Black Meet</span></a>
+            <a href="<%- url('home') %>"><span class="font-display-md text-display-md font-bold text-primary">Black Meet</span></a>
         </div>
             <div class="flex items-center gap-3">
             <button id="bell-btn" class="relative text-on-surface-variant hover:bg-surface-variant/20 p-2 rounded-full" onclick="toggleNotifications()" title="اعلان‌ها">
                 <span class="material-symbols-outlined">notifications</span>
                 <span id="bell-dot" class="hidden absolute top-1 right-1 w-2 h-2 bg-error rounded-full"></span>
             </button>
-            <a href="<%- url('profile.php') %>" title="پروفایل" class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant flex items-center justify-center font-headline-md text-white hover:opacity-90 transition" style="background:<%- esc(me.avatar_color) %>"><% if (me.avatar) { %><img src="<%- esc(avatarUrl(me.avatar)) %>" class="w-full h-full object-cover" alt=""/><% } else { %><%- esc(initials) %><% } %></a>
+            <a href="<%- url('profile') %>" title="پروفایل" class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant flex items-center justify-center font-headline-md text-white hover:opacity-90 transition" style="background:<%- esc(me.avatar_color) %>"><% if (me.avatar) { %><img src="<%- esc(avatarUrl(me.avatar)) %>" class="w-full h-full object-cover" alt=""/><% } else { %><%- esc(initials) %><% } %></a>
             <button class="text-on-surface-variant hover:bg-surface-variant/20 p-2 rounded-full" onclick="logout(event)"><span class="material-symbols-outlined">logout</span></button>
         </div>
     </header>
@@ -71,7 +71,7 @@
                 <p class="font-body-sm text-body-sm text-on-primary-container/80 mt-2">شروع یک تماس ویدیویی امن</p>
             </button>
             <% } else { %>
-            <button class="hero-glow group relative overflow-hidden bg-primary-container text-on-primary-container rounded-xl p-8 flex flex-col items-center justify-center min-h-[200px] transition-transform duration-300 hover:scale-[1.02]" onclick="location.href='<%- url('create.php') %>'">
+            <button class="hero-glow group relative overflow-hidden bg-primary-container text-on-primary-container rounded-xl p-8 flex flex-col items-center justify-center min-h-[200px] transition-transform duration-300 hover:scale-[1.02]" onclick="location.href='<%- url('create') %>'">
                 <div class="absolute inset-0 bg-gradient-to-br from-white/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                 <span class="material-symbols-outlined text-[64px] mb-4 drop-shadow-md" style="font-variation-settings:'FILL' 1;">video_call</span>
                 <h2 class="font-headline-lg text-headline-lg font-semibold">ایجاد تماس جدید</h2>
@@ -137,16 +137,16 @@
 
 <!-- Mobile bottom nav -->
 <nav class="md:hidden bg-surface-container/60 fixed bottom-0 w-full z-50 rounded-t-xl backdrop-blur-xl border-t border-white/10 shadow-xl flex justify-around items-center h-20 px-md">
-    <a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1" href="<%- url('home.php') %>">
+    <a class="flex flex-col items-center justify-center bg-secondary-container text-on-secondary-container rounded-full px-4 py-1" href="<%- url('home') %>">
         <span class="material-symbols-outlined" style="font-variation-settings:'FILL' 1;">home</span><span class="font-label-md text-label-md mt-1">خانه</span></a>
     <% if (limited) { %>
     <a class="flex flex-col items-center justify-center text-on-surface-variant" href="#" onclick="document.getElementById('toast-message').textContent='حساب شما محدود شده و امکان ایجاد تماس جدید وجود ندارد';document.getElementById('toast').classList.remove('hidden');setTimeout(()=>document.getElementById('toast').classList.add('hidden'),4000);return false;">
         <span class="material-symbols-outlined">video_call</span><span class="font-label-md text-label-md mt-1">تماس</span></a>
     <% } else { %>
-    <a class="flex flex-col items-center justify-center text-on-surface-variant" href="<%- url('create.php') %>">
+    <a class="flex flex-col items-center justify-center text-on-surface-variant" href="<%- url('create') %>">
         <span class="material-symbols-outlined">video_call</span><span class="font-label-md text-label-md mt-1">تماس</span></a>
     <% } %>
-    <a class="flex flex-col items-center justify-center text-on-surface-variant" href="<%- url('profile.php') %>">
+    <a class="flex flex-col items-center justify-center text-on-surface-variant" href="<%- url('profile') %>">
         <span class="material-symbols-outlined">person</span><span class="font-label-md text-label-md mt-1">پروفایل</span></a>
 </nav>
 

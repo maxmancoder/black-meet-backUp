@@ -1,5 +1,5 @@
 // assets/js/live.js — Phase 1: ONE shared authenticated realtime connection per page.
-// Handshake-authenticated (user token from api/socket_token.php), heartbeat,
+// Handshake-authenticated (user token from api/socket-token), heartbeat,
 // connection status events, bm-event bridging. No polling fallbacks.
 (function () {
   'use strict';
@@ -54,7 +54,7 @@
     var url = window.__BM_LIVE_URL || undefined;    // '' → same origin (proxied)
 
     // fetch a per-user token, then connect with it (handshake auth is mandatory)
-    fetch((window.BASE || '') + '/api/socket_token.php')
+    fetch((window.BASE || '') + '/api/socket-token')
       .then(function (r) { return r.json(); })
       .then(function (d) {
         if (!d.ok || !d.token) { emitLocal('live:error', { error: 'NO_TOKEN' }); return; }

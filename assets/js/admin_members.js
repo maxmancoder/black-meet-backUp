@@ -14,6 +14,10 @@
   }
 
   function statusCell(u) {
+    if (u.is_manager) {
+      return '<span class="inline-flex items-center gap-1 text-white bg-gradient-to-br from-amber-500 to-orange-600 px-2 py-1 rounded-full font-label-sm shadow-lg">' +
+        '<span class="material-symbols-outlined text-[16px]">shield_person</span> مدیر</span>';
+    }
     if (u.is_limited) {
       return '<span class="inline-flex items-center gap-1 text-error-container bg-error-container/20 px-2 py-1 rounded-full font-label-sm">' +
         '<span class="material-symbols-outlined text-[16px]">block</span> محدود</span>';
@@ -27,10 +31,9 @@
     const limited = !!u.is_limited;
     const cls = limited ? 'bg-secondary-container text-on-secondary-container' : 'bg-error-container/80 text-on-error-container';
     const label = limited ? 'رفع محدودیت' : 'محدود کردن';
-    return '<div class="flex flex-col gap-1.5 items-start">' +
+    return '' +
       '<button id="btn-lim-' + u.id + '" onclick="toggleLimit(' + u.id + ')" class="text-[12px] px-3 py-1.5 rounded-md ' + cls + ' hover:opacity-80 transition-opacity">' + label + '</button>' +
-      '<button onclick="resetPassword(' + u.id + ')" class="text-[12px] px-3 py-1.5 rounded-md bg-surface-container-high text-on-surface hover:opacity-80 transition-opacity">تغییر رمز</button>' +
-      '</div>';
+      '<button onclick="resetPassword(' + u.id + ')" class="text-[12px] px-3 py-1.5 rounded-md bg-surface-container-high text-on-surface hover:opacity-80 transition-opacity">تغییر رمز</button>';
   }
 
   function avatarHtml(u, size) {
@@ -43,26 +46,28 @@
     return '<div class="' + sz + ' rounded-full flex items-center justify-center text-white text-[12px]" style="background:' + esc(u.avatar_color) + '">' + initial + '</div>';
   }
 
-  function rowEl(u) {
-    const tr = document.createElement('tr');
-    tr.id = 'user-row-' + u.id;
-    tr.className = 'border-t border-outline-variant/10 hover:bg-surface-container-low/60';
-    tr.innerHTML = `
-      <td class="p-3 whitespace-nowrap">
-        <div class="flex items-center gap-2">
-          ${avatarHtml(u)}
-          <span class="font-body-sm text-on-surface">${esc(u.full_name)}</span>
+  function cardEl(u) {
+    const card = document.createElement('div');
+    card.id = 'user-row-' + u.id;
+    card.className = 'bg-surface-container-low rounded-xl border border-outline-variant/20 p-4 flex flex-col gap-3 bm-soft';
+    card.innerHTML = `
+      <div class="flex items-center gap-3 min-w-0">
+        ${avatarHtml(u, 'w-12 h-12 flex-shrink-0')}
+        <div class="min-w-0 flex-1">
+          <h3 class="font-body-sm font-semibold text-on-surface truncate">${esc(u.display_name)}</h3>
+          <p class="font-label-sm text-on-surface-variant truncate" dir="ltr">@${esc(u.username)}</p>
         </div>
-      </td>
-      <td class="p-3 font-label-sm text-on-surface-variant" dir="ltr">${esc(u.username)}</td>
-      <td class="p-3 font-body-sm text-on-surface">${esc(u.display_name)}</td>
-      <td class="p-3 font-body-sm text-on-surface-variant" dir="ltr">${esc(u.email)}</td>
-      <td class="p-3 font-body-sm text-on-surface-variant" dir="ltr">${u.is_manager ? '•••••• (هش‌شده)' : esc(u.password_hash)}</td>
-      <td class="p-3 font-body-sm text-on-surface-variant" dir="ltr">${esc(u.phone)}</td>
-      <td class="p-3 font-body-sm text-on-surface">${u.is_manager ? 'مدیر' : 'عضو'}</td>
-      <td class="p-3" id="lim-${u.id}">${statusCell(u)}</td>
-      <td class="p-3" id="act-${u.id}">${actionCell(u)}</td>`;
-    return tr;
+        <div id="lim-${u.id}" class="flex-shrink-0">${statusCell(u)}</div>
+      </div>
+      <div class="flex flex-col gap-1.5 text-[13px] leading-6 min-w-0">
+        <div class="flex items-center gap-2 min-w-0"><span class="material-symbols-outlined text-[16px] text-on-surface-variant flex-shrink-0">badge</span><span class="font-body-sm text-on-surface truncate">${esc(u.full_name)}</span></div>
+        <div class="flex items-center gap-2 min-w-0"><span class="material-symbols-outlined text-[16px] text-on-surface-variant flex-shrink-0">email</span><span class="font-body-sm text-on-surface-variant truncate" dir="ltr">${esc(u.email)}</span></div>
+        <div class="flex items-center gap-2 min-w-0"><span class="material-symbols-outlined text-[16px] text-on-surface-variant flex-shrink-0">key</span><span class="font-body-sm text-on-surface-variant truncate font-mono" dir="ltr">${u.is_manager ? '•••••• (هش‌شده)' : esc(u.password_hash)}</span></div>
+        <div class="flex items-center gap-2 min-w-0"><span class="material-symbols-outlined text-[16px] text-on-surface-variant flex-shrink-0">phone</span><span class="font-body-sm text-on-surface-variant" dir="ltr">${esc(u.phone)}</span></div>
+        <div class="flex items-center gap-2"><span class="material-symbols-outlined text-[16px] text-on-surface-variant flex-shrink-0">shield_person</span><span class="font-body-sm text-on-surface">${u.is_manager ? 'مدیر' : 'عضو'}</span></div>
+      </div>
+      <div id="act-${u.id}" class="flex gap-2 flex-wrap pt-1 border-t border-outline-variant/10 items-center">${actionCell(u)}</div>`;
+    return card;
   }
 
   function render() {
@@ -78,14 +83,14 @@
       );
     }
     const shown = list.slice(0, size);
-    const tbody = $('user-tbody');
-    tbody.innerHTML = '';
+    const box = $('user-cards');
+    box.innerHTML = '';
     if (!shown.length) {
-      tbody.innerHTML = '<tr><td colspan="9" class="p-6 text-center text-on-surface-variant font-body-sm">موردی یافت نشد</td></tr>';
+      box.innerHTML = '<div class="col-span-full border border-dashed border-outline-variant rounded-xl p-6 text-center text-on-surface-variant font-body-sm">موردی یافت نشد</div>';
     } else {
       const frag = document.createDocumentFragment();
-      shown.forEach(u => frag.appendChild(rowEl(u)));
-      tbody.appendChild(frag);
+      shown.forEach(u => frag.appendChild(cardEl(u)));
+      box.appendChild(frag);
     }
     $('result-count').textContent = list.length + ' کاربر' + (list.length > shown.length ? ' (نمایش ' + shown.length + ' مورد)' : '');
   }
@@ -96,7 +101,7 @@
   window.toggleLimit = function (userId) {
     const btn = $('btn-lim-' + userId);
     if (btn) { btn.disabled = true; btn.textContent = '...'; }
-    fetch('api/admin_members.php', {
+    fetch('api/admin/members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ csrf: window.CSRF, user_id: String(userId) })
@@ -112,20 +117,43 @@
       .catch(() => { showToast('خطای شبکه'); if (btn) { btn.disabled = false; btn.textContent = 'تلاش مجدد'; } });
   };
 
+  let pwdResetUserId = null;
+
   window.resetPassword = function (userId) {
-    const np = prompt('رمز عبور جدید را وارد کنید (خالی = تولید خودکار):');
-    if (np === null) return;
-    fetch('api/admin_members.php', {
+    pwdResetUserId = userId;
+    const u = allUsers.find(x => x.id === userId);
+    document.getElementById('pwd-target').textContent = u
+      ? (u.display_name || u.username || ('کاربر #' + userId))
+      : ('کاربر #' + userId);
+    document.getElementById('pwd-input').value = '';
+    document.getElementById('pwd-modal').classList.remove('hidden');
+    document.getElementById('pwd-input').focus();
+  };
+
+  window.closePwdModal = function () {
+    document.getElementById('pwd-modal').classList.add('hidden');
+    pwdResetUserId = null;
+  };
+
+  window.submitPasswordReset = function () {
+    const userId = pwdResetUserId;
+    const np = document.getElementById('pwd-input').value.trim();
+    if (userId == null) return;
+    const btn = document.querySelector('#pwd-modal .btn-primary, #pwd-modal button');
+    if (btn) { btn.disabled = true; }
+    fetch('api/admin/members', {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ csrf: window.CSRF, user_id: String(userId), action: 'reset_password', new_password: np.trim() })
+      body: new URLSearchParams({ csrf: window.CSRF, user_id: String(userId), action: 'reset_password', new_password: np })
     })
       .then(r => r.json())
       .then(d => {
+        if (btn) btn.disabled = false;
         if (!d.ok) { showToast(d.msg || 'خطا'); return; }
         showToast(d.generated ? ('رمز جدید: ' + d.generated) : 'رمز عبور به‌روزرسانی شد');
+        closePwdModal();
       })
-      .catch(() => showToast('خطای شبکه'));
+      .catch(() => { if (btn) btn.disabled = false; showToast('خطای شبکه'); });
   };
 
   render();

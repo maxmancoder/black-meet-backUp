@@ -19,10 +19,12 @@
   let currentVideoTrack = null;
   let micOn = false, camOn = false, sharing = false;
   let approved = (I.me.status === 'approved');
+  const defaultMedia = !(I.meeting && I.meeting.default_media === 0);
 
   const pcMap = new Map();        // userId -> { pc, polite, makingOffer, ignoreOffer, srdAnswerPending }
   const peerMeta = new Map();     // userId -> {name, avatar_color, avatar}
   const memberStatus = new Map(); // userId -> {muted,cam,sharing}
+  const memberInfo = new Map();    // userId -> {full_name,email,phone,is_manager,role,has_password,...}
   const memberNames = new Map();  // userId -> display name
   const localBlock = {};          // userId -> {audio,video,screen} (per-viewer local blocks)
   const localAudio = {};          // userId -> {muted, volume}
@@ -30,6 +32,32 @@
   let menuUserId = null;
   let currentList = [];
   let joinedRoom = false;
+  const SELF = {
+    userId: I.me.id, name: I.me.name, username: I.me.username,
+    avatar_color: I.me.avatar_color, avatar: String(I.me.avatar || ''),
+    is_admin: !!I.me.is_admin, status: I.me.status || 'pending',
+    muted: false, cam: false, sharing: false,
+  };
+
+  // ---- roster helpers: currentList always includes SELF so the counter is exact.
+  function normalizeMember(m) {
+    return {
+      userId: m.userId, name: m.name, username: m.username || '',
+      avatar_color: m.avatar_color, avatar: String(m.avatar || ''),
+      is_admin: !!m.is_admin, status: m.status === 'approved' ? 'approved' : 'pending',
+      muted: !!m.muted, cam: m.cam !== false, sharing: !!m.sharing,
+    };
+  }
+  function upsertMember(m) {
+    m = normalizeMember(m);
+    const i = currentList.findIndex(x => x.userId === m.userId);
+    const merged = i >= 0 ? Object.assign({}, currentList[i], m) : m;
+    if (i >= 0) currentList[i] = merged; else currentList.push(merged);
+    return merged;
+  }
+  function dropMember(userId) {
+    currentList = currentList.filter(x => (x.userId !== userId));
+  }
 
   const $ = id => document.getElementById(id);
   const grid = $('video-grid');
@@ -67,19 +95,30 @@
   };
 
   // ---------- Media ----------
+  // Audio and camera are requested SEPARATELY so a missing or denied camera
+  // never kills the microphone. Local tracks are added to each peer after both.
   function startMedia() {
-    if (!navigator.mediaDevices) { renderSelf(); return Promise.resolve(); }
-    return navigator.mediaDevices.getUserMedia({ audio: true, video: true })
-      .then(stream => {
-        localStream = stream;
-        cameraTrack = stream.getVideoTracks()[0] || null;
-        micOn = true; camOn = true;
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { renderSelf(); return Promise.resolve(); }
+    return navigator.mediaDevices.getUserMedia({ audio: true })
+      .then(audioStream => {
+        localStream = audioStream;
+        micOn = true;
+        return navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' } })
+          .then(videoStream => {
+            cameraTrack = videoStream.getVideoTracks()[0] || null;
+            if (cameraTrack) localStream.addTrack(cameraTrack);
+            camOn = !!cameraTrack;
+          })
+          .catch(() => { camOn = false; cameraTrack = null; });
+      })
+      .then(() => {
         currentVideoTrack = cameraTrack;
         updateSelfVideo();
         updateControlUI();
+        if (approved) applyDefaultMedia();
         pcMap.forEach(({ pc }) => addLocalTracks(pc));
       })
-      .catch(() => { renderSelf(); updateControlUI(); });
+      .catch(() => { micOn = false; camOn = false; renderSelf(); updateControlUI(); });
   }
 
   function addLocalTracks(pc) {
@@ -107,6 +146,19 @@
     $('ic-cam').textContent = camOn ? 'videocam' : 'videocam_off';
     $('btn-cam').classList.toggle('ctrl-off', !camOn);
     $('btn-share').classList.toggle('ctrl-off', !sharing);
+  }
+
+  // Joining with media off (create-page toggle, state 2): arrive muted + cam off,
+  // the meeting admin can still enable mic/cam later via CALL_DISABLE.
+  function applyDefaultMedia() {
+    if (!approved || I.me.is_admin || defaultMedia) return;
+    micOn = false;
+    if (!sharing) camOn = false;
+    if (localStream) localStream.getTracks().forEach(t => t.enabled = false);
+    if (!sharing) currentVideoTrack = null;
+    updateSelfVideo();
+    updateControlUI();
+    broadcastStatus();
   }
 
   // ---------- Tiles ----------
@@ -141,6 +193,7 @@
     const tile = document.createElement('div');
     tile.id = 'tile-self';
     tile.className = 'aspect-video bg-surface-container relative rounded-xl overflow-hidden shadow-lg border-2 border-secondary';
+    tile.onclick = () => toggleFocus('self');
     tile.innerHTML = `
       <video id="self-video" autoplay muted playsinline class="w-full h-full object-cover"></video>
       <div id="self-avatar" class="hidden absolute inset-0 flex items-center justify-center">
@@ -159,6 +212,7 @@
     tile = document.createElement('div');
     tile.id = 'tile-' + userId;
     tile.className = 'aspect-video bg-surface-container relative rounded-xl border border-white/10 overflow-hidden shadow-lg';
+    tile.onclick = () => toggleFocus(String(userId));
     tile.innerHTML = `
       <video id="vid-${userId}" autoplay playsinline class="w-full h-full object-cover"></video>
       <div id="av-${userId}" class="hidden absolute inset-0 flex items-center justify-center">
@@ -302,6 +356,29 @@
     if (socket) socket.emit(EV.CALL_STATUS, { muted: !micOn, cam: camOn, sharing });
   }
 
+  // adopt (server-provided) members into the roster; merge, never replace.
+  function adoptMembers(list, createPcs) {
+    (list || []).forEach(m => {
+      const mm = upsertMember(m);
+      memberNames.set(mm.userId, mm.name);
+      peerMeta.set(mm.userId, { name: mm.name, avatar_color: mm.avatar_color, avatar: mm.avatar || '' });
+      memberStatus.set(mm.userId, { muted: !!mm.muted, cam: mm.cam !== false, sharing: !!mm.sharing });
+      if (mm.full_name || mm.email || mm.phone || mm.is_manager != null || mm.role != null) {
+        memberInfo.set(mm.userId, {
+          full_name: mm.full_name, username: mm.username, display_name: mm.name,
+          email: mm.email, phone: mm.phone, is_manager: !!mm.is_manager,
+          role: mm.role, has_password: !!mm.has_password,
+        });
+      }
+      if (createPcs && mm.status === 'approved' && mm.userId !== I.me.id) {
+        getOrCreateTile(mm.userId, mm);
+        createPC(mm, I.me.id > mm.userId);
+      }
+      renderOneMember(mm);
+    });
+    renderPendingCards();
+  }
+
   function doJoin(cb) {
     if (!socket || !socket.connected || joinedRoom) { if (typeof cb === 'function') cb({ ok: false }); return; }
     joinedRoom = true;
@@ -315,25 +392,14 @@
       }
     }, (resp) => {
       if (resp && resp.ok) {
-        // apply authoritative bootstrap members
-        (resp.members || []).forEach(m => {
-          memberNames.set(m.userId, m.name);
-          peerMeta.set(m.userId, { name: m.name, avatar_color: m.avatar_color, avatar: m.avatar || '' });
-          memberStatus.set(m.userId, { muted: !!m.muted, cam: m.cam !== false, sharing: !!m.sharing });
-          if (m.status === 'approved') {
-            getOrCreateTile(m.userId, m);
-            createPC(m, I.me.id > m.userId);
-          }
-          renderOneMember(m);
-        });
-        currentList = (resp.members || []).slice();
-        renderPendingCards();
+        // authoritative bootstrap members — merged into the SSR roster
+        adoptMembers(resp.members, true);
       } else if (resp && resp.error === 'BLOCKED') {
         showToast('شما از این تماس مسدود شده‌اید');
-        setTimeout(() => location.href = I.base + '/home.php?err=blocked', 1500);
+        setTimeout(() => location.href = I.base + '/home?err=blocked', 1500);
       } else if (resp && resp.error === 'MEETING_NOT_FOUND') {
         showToast('این تماس دیگر فعال نیست');
-        setTimeout(() => location.href = I.base + '/home.php', 1500);
+        setTimeout(() => location.href = I.base + '/home', 1500);
       }
       if (typeof cb === 'function') cb(resp || { ok: false });
     });
@@ -353,51 +419,40 @@
     window.BM_SOCKET = socket;
 
     socket.on('connect', () => {
-      const el = $('conn-state'); if (el) { el.textContent = 'زنده'; el.className = 'w-2 h-2 rounded-full bg-secondary'; }
+      setConn('زنده', 'bg-secondary');
       joinedRoom = false;
       if (mediaReady) doJoin();
     });
     socket.on('disconnect', () => {
-      const el = $('conn-state'); if (el) { el.textContent = 'قطع'; el.className = 'w-2 h-2 rounded-full bg-error'; }
+      setConn('قطع', 'bg-error');
     });
     socket.on('reconnect_attempt', () => {
-      const el = $('conn-state'); if (el) { el.textContent = 'اتصال...'; el.className = 'w-2 h-2 rounded-full bg-warning'; }
+      setConn('اتصال...', 'bg-warning');
     });
     socket.on(EV.ERR, d => showToast(d.msg || d.error || 'خطا'));
 
     socket.on(EV.YOU_APPROVED, () => {
       approved = true;
+      SELF.status = 'approved';
+      upsertMember(SELF);
+      renderOneMember(SELF);
+      renderPendingCards();
       $('waiting-overlay').classList.add('hidden');
-      broadcastStatus();
+      applyDefaultMedia();
     });
     socket.on(EV.CALL_WELCOME, (d) => {
-      // authoritative initial room state
-      (d.members || []).forEach(m => {
-        memberNames.set(m.userId, m.name);
-        peerMeta.set(m.userId, { name: m.name, avatar_color: m.avatar_color, avatar: m.avatar || '' });
-        memberStatus.set(m.userId, { muted: !!m.muted, cam: m.cam !== false, sharing: !!m.sharing });
-        if (m.status === 'approved') {
-          getOrCreateTile(m.userId, m);
-          createPC(m, I.me.id > m.userId);
-        }
-        renderOneMember(m);
-      });
-      currentList = (d.members || []).slice();
-      renderPendingCards();
+      // authoritative initial room state — merged, keeps SELF + SSR entries
+      adoptMembers(d.members, true);
     });
     socket.on(EV.MEMBER_JOINED, ({ member }) => {
-      memberNames.set(member.userId, member.name);
-      peerMeta.set(member.userId, { name: member.name, avatar_color: member.avatar_color, avatar: member.avatar || '' });
-      memberStatus.set(member.userId, { muted: !!member.muted, cam: member.cam !== false, sharing: !!member.sharing });
-      currentList = currentList.filter(m => m.userId !== member.userId).concat([member]);
-      renderOneMember(member);
-      renderPendingCards();
+      adoptMembers([member], true);
     });
     socket.on(EV.MEMBER_LEFT, ({ userId }) => {
-      currentList = currentList.filter(m => m.userId !== userId);
+      dropMember(userId);
       removeMemberRow(userId);
       destroyPC(userId);
       removeTile(userId);
+      if (userId === I.me.id) currentList = currentList.filter(x => x.userId !== userId);
       renderPendingCards();
       layoutGrid();
     });
@@ -410,37 +465,26 @@
       const m = currentList.find(x => x.userId === d.userId);
       if (m) Object.assign(m, d);
       updateTileStatus(d.userId);
+      if (I.me.is_admin) renderAdminMembers(currentList);
     });
     socket.on(EV.MEMBER_PENDING, ({ member }) => {
-      memberNames.set(member.userId, member.name);
-      peerMeta.set(member.userId, { name: member.name, avatar_color: member.avatar_color, avatar: member.avatar || '' });
-      currentList = currentList.filter(m => m.userId !== member.userId).concat([member]);
-      renderOneMember(member);
-      renderPendingCards();
+      adoptMembers([member], false);
       playBeep();
       showToast('درخواست ورود از سمت ' + (member.name || 'یک کاربر'));
     });
     socket.on(EV.MEMBER_APPROVED, ({ member }) => {
-      memberNames.set(member.userId, member.name);
-      peerMeta.set(member.userId, { name: member.name, avatar_color: member.avatar_color, avatar: member.avatar || '' });
-      currentList = currentList.filter(m => m.userId !== member.userId).concat([member]);
-      memberStatus.set(member.userId, { muted: false, cam: false, sharing: false });
-      if (member.userId !== I.me.id) {
-        getOrCreateTile(member.userId, member);
-        createPC(member, I.me.id > member.userId);
-      }
-      renderOneMember(member);
-      renderPendingCards();
+      if (member.userId === I.me.id) approved = true;
+      adoptMembers([member], true);
     });
     socket.on(EV.MEMBER_KICKED, ({ userId }) => {
-      currentList = currentList.filter(m => m.userId !== userId);
+      dropMember(userId);
       removeMemberRow(userId);
       destroyPC(userId);
       removeTile(userId);
       renderPendingCards();
     });
     socket.on(EV.MEMBER_BLOCKED, ({ userId }) => {
-      currentList = currentList.filter(m => m.userId !== userId);
+      dropMember(userId);
       removeMemberRow(userId);
       destroyPC(userId);
       removeTile(userId);
@@ -460,9 +504,9 @@
         if (d.off) stopShare();
       }
     });
-    socket.on(EV.YOU_REJECTED, () => { showToast('درخواست شما رد شد'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
-    socket.on(EV.YOU_REMOVED, () => { showToast('از تماس حذف شدید'); setTimeout(() => location.href = I.base + '/home.php', 1500); });
-    socket.on(EV.YOU_BLOCKED, () => { showToast('شما مسدود شدید'); setTimeout(() => location.href = I.base + '/home.php?err=blocked', 2000); });
+    socket.on(EV.YOU_REJECTED, () => { showToast('درخواست شما رد شد'); setTimeout(() => location.href = I.base + '/home', 1500); });
+    socket.on(EV.YOU_REMOVED, () => { showToast('از تماس حذف شدید'); setTimeout(() => location.href = I.base + '/home', 1500); });
+    socket.on(EV.YOU_BLOCKED, () => { showToast('شما مسدود شدید'); setTimeout(() => location.href = I.base + '/home?err=blocked', 2000); });
     socket.on(EV.JOIN_ALERT, d => {
       playBeep();
       showToast('درخواست ورود از سمت ' + (d.name || 'یک کاربر'));
@@ -488,13 +532,13 @@
     const row = document.createElement('div');
     row.className = 'flex items-center gap-3 p-2 hover:bg-surface-container rounded-lg transition-colors group';
     row.dataset.uid = m.userId;
-    const mutedIcon = m.muted ? '<span class="material-symbols-outlined text-[10px] text-on-error">mic_off</span>' : '<span class="material-symbols-outlined text-[10px] text-on-secondary">mic</span>';
-    let actions = '';
+const mutedIcon = m.muted ? '<span class="material-symbols-outlined text-[10px] text-on-error">mic_off</span>' : '<span class="material-symbols-outlined text-[10px] text-on-secondary">mic</span>';
+    let actions = `<div class="opacity-0 group-hover:opacity-100 flex gap-1 items-center transition-opacity">
+      <button class="p-1.5 text-on-surface-variant hover:text-primary hover:bg-primary/10 rounded-md" title="مشاهده اطلاعات" onclick="openMemberInfo(${m.userId})"><span class="material-symbols-outlined text-[18px]">info</span></button>`;
     if (I.me.is_admin && !isSelf) {
-      actions = `<div class="opacity-0 group-hover:opacity-100 flex gap-1 transition-opacity">
-        <button class="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-md" title="حذف" onclick="adminRemove(${m.userId})"><span class="material-symbols-outlined text-[18px]">person_remove</span></button>
-      </div>`;
+      actions += `<button class="p-1.5 text-on-surface-variant hover:text-error hover:bg-error/10 rounded-md" title="حذف" onclick="adminRemove(${m.userId})"><span class="material-symbols-outlined text-[18px]">person_remove</span></button>`;
     }
+    actions += `</div>`;
     row.innerHTML = `
       <div class="relative">
         <div class="w-10 h-10 rounded-full overflow-hidden border border-outline-variant">${avatarMarkup(m)}</div>
@@ -527,10 +571,17 @@
     updateTileName(m.userId);
     updateTileStatus(m.userId);
   }
+  function setConn(state, cls) {
+    document.querySelectorAll('.conn-state').forEach(el => {
+      el.textContent = state;
+      el.className = 'w-2 h-2 rounded-full ' + cls + ' conn-state';
+    });
+  }
+
   function updateCounts() {
-    const list = currentList;
-    $('participant-count').textContent = list.length;
-    const pendingCount = list.filter(m => m.status !== 'approved' && m.userId !== I.me.id).length;
+    const n = currentList.length;
+    document.querySelectorAll('#participant-count, .participant-count').forEach(el => { el.textContent = String(n); });
+    const pendingCount = currentList.filter(m => m.status !== 'approved' && m.userId !== I.me.id).length;
     const badge = $('admin-badge'); if (badge) badge.classList.toggle('hidden', pendingCount === 0);
     const sBadge = $('sidebar-badge'); if (sBadge) sBadge.classList.toggle('hidden', pendingCount === 0);
   }
@@ -717,7 +768,7 @@
     if (socket) socket.emit(EV.CALL_LEAVE, {}, () => {});
     pcMap.forEach(({ pc }) => pc.close());
     if (localStream) localStream.getTracks().forEach(t => t.stop());
-    location.href = I.base + '/home.php';
+    location.href = I.base + '/home';
   };
 
   // ---------- Admin actions (single socket path) ----------
@@ -779,6 +830,73 @@
     applyMediaOverrides(menuUserId);
   };
 
+  // ---------- Member info panel (glowing steel boxes) ----------
+  function roleLabel(info) {
+    if (info.is_manager) return 'مدیر';
+    if (info.role === 'admin') return 'ادمین تماس';
+    return 'کاربر عادی';
+  }
+
+  function infoBox(title, val, ltrAt) {
+    return `<div class="bm-infobox">
+      <span class="bm-infobox-title">${escapeHtml(title)}</span>
+      <span class="bm-infobox-val"${ltrAt ? ' dir="ltr"' : ''}>${val === '' || val == null ? '—' : escapeHtml(val)}</span>
+    </div>`;
+  }
+
+  function renderMemberInfoModal(userId) {
+    const member = currentList.find(m => m.userId === userId);
+    const info = memberInfo.get(userId) || {};
+    const meta = peerMeta.get(userId) || {};
+    const name = (info.display_name || member && member.name || meta.name || 'کاربر');
+    const avatarEl = $('mi-avatar');
+    if (avatarEl) {
+      if (meta.avatar) {
+        avatarEl.innerHTML = `<img src="${escapeHtml(meta.avatar)}" class="w-full h-full object-cover" alt=""/>`;
+      } else {
+        avatarEl.style.background = (member && member.avatar_color) ? member.avatar_color : '#4f46e5';
+        avatarEl.textContent = initials(name);
+      }
+    }
+    $('mi-name').textContent = name;
+    $('mi-sub').textContent = '@' + (info.username || (member && member.username) || '');
+    $('mi-grid').innerHTML = [
+      infoBox('نام کامل', info.full_name),
+      infoBox('نام کاربری', info.username, 1),
+      infoBox('نام نمایشی', info.display_name),
+      infoBox('ایمیل', info.email, 1),
+      infoBox('رمز هش شده', info.has_password ? 'هش شده' : 'ندارد'),
+      infoBox('شماره موبایل', info.phone, 1),
+      infoBox('نقش', roleLabel(info)),
+    ].join('');
+    $('member-info').classList.remove('hidden');
+  }
+
+  window.openMemberInfo = function (userId) {
+    userId = Number(userId);
+    memberInfo.set(userId, Object.assign({}, memberInfo.get(userId) || {}, {
+      username: memberInfo.get(userId) && memberInfo.get(userId).username || ((memberNames.get(userId) || '')),
+    }));
+    renderMemberInfoModal(userId);
+    fetch((I.base || '') + '/api/members/' + encodeURIComponent(userId)) // /api/members/:userId — the call-page info panel fetches it
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.ok && d.user) {
+          const u = d.user;
+          memberInfo.set(userId, {
+            full_name: u.full_name, username: u.username, display_name: u.display_name,
+            email: u.email, phone: u.phone, is_manager: !!u.is_manager,
+            role: (memberInfo.get(userId) || {}).role || '', has_password: !!u.has_password,
+          });
+          renderMemberInfoModal(Number(userId));
+        }
+      })
+      .catch(() => { /* keep SSR data */ });
+  };
+  window.closeMemberInfo = function () {
+    $('member-info').classList.add('hidden');
+  };
+
   // ---------- Overrides & tile helpers ----------
   function applyMediaOverrides(userId) {
     const v = $('vid-' + userId), av = $('av-' + userId);
@@ -798,13 +916,28 @@
     const nm = memberNames.get(userId) || (peerMeta.get(userId) || {}).name;
     el.textContent = nm || 'بدون نام';
   }
+  let focusedKey = null;
   function layoutGrid() {
     if (!grid) return;
     grid.style.display = 'grid';
     grid.style.gap = '1rem';
-    grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))';
+    if (focusedKey && grid.querySelector('#tile-' + focusedKey)) {
+      // spotlight: focused tile takes ~80% of the width, others flow into the narrow column
+      grid.style.gridTemplateColumns = 'minmax(0, 4fr) minmax(0, 1fr)';
+    } else {
+      if (focusedKey) focusedKey = null;
+      grid.style.gridTemplateColumns = 'repeat(auto-fit, minmax(min(100%, 260px), 1fr))';
+    }
+    Array.from(grid.children).forEach(t => {
+      t.classList.toggle('tile-focused', !!(focusedKey && t.id === 'tile-' + focusedKey));
+    });
   }
   window.addEventListener('resize', layoutGrid);
+
+  window.toggleFocus = function (key) {
+    focusedKey = (focusedKey === key) ? null : key;
+    layoutGrid();
+  };
 
   function updateTileStatus(userId) {
     const st = memberStatus.get(userId) || {};
@@ -831,7 +964,16 @@
         avatar_color: p.avatar_color, avatar: p.avatar
       }));
       mapped.forEach(m => {
+        const p = (I.participants || []).find(x => x.user_id === m.userId);
         memberNames.set(m.userId, m.name);
+        memberStatus.set(m.userId, { muted: !!m.muted, cam: m.cam !== false, sharing: !!m.sharing });
+        if (p && (p.full_name != null || p.email != null || p.phone != null || p.is_manager != null)) {
+          memberInfo.set(m.userId, {
+            full_name: p.full_name, username: p.username, display_name: p.display_name,
+            email: p.email, phone: p.phone, is_manager: !!p.is_manager,
+            role: p.role, has_password: true,
+          });
+        }
         if (m.userId !== I.me.id && m.status === 'approved') getOrCreateTile(m.userId, m);
       });
       currentList = mapped;

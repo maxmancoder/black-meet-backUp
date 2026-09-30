@@ -7,7 +7,7 @@
   var doc = document;
   var skipPages = window.__BM_SKIP_BUTTON_LOADER || [];
   var isCallPage = skipPages.indexOf('call') !== -1 ||
-    /call\.php$/i.test((location.pathname.split('/').pop() || ''));
+    /(^|\/)(meeting|call\.php)$/i.test(location.pathname);
 
   // ---------- soft page-transition overlay ----------
   var overlay = null, overlayShown = 0;

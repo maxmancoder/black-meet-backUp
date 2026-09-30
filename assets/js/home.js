@@ -16,8 +16,6 @@
     if (!val) return '';
     const m = val.match(/[?&]room=([^&\s]+)/);
     if (m) return m[1];
-    const u = val.match(/call\.php\/([^/\s]+)/);
-    if (u) return u[1];
     return val;
   }
 
@@ -27,10 +25,10 @@
     const raw = document.getElementById('join-input').value;
     const room = extractRoom(raw);
     if (!room) return showToast('لینک یا کد تماس را وارد کنید');
-    fetch('api/meeting_info.php?room=' + encodeURIComponent(room))
+    fetch('api/meetings/info?room=' + encodeURIComponent(room))
       .then(r => r.json())
       .then(d => {
-        if (d.ok) location.href = BASE + '/call.php?room=' + encodeURIComponent(d.room_id);
+        if (d.ok) location.href = BASE + '/meeting?room=' + encodeURIComponent(d.room_id);
         else showToast('لینک تماس معتبر نیست');
       })
       .catch(() => showToast('خطا در برقراری ارتباط'));
@@ -38,11 +36,11 @@
 
   window.logout = function (e) {
     if (e) e.preventDefault();
-    fetch('api/logout.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'csrf=' + encodeURIComponent(window.CSRF) })
+    fetch('api/logout', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: 'csrf=' + encodeURIComponent(window.CSRF) })
       .then(r => r.json())
       .then(d => {
         localStorage.removeItem('blackmeet_logged_in');
-        location.href = d.redirect || BASE + '/index.php';
+        location.href = d.redirect || BASE + '/login';
       });
   };
 
@@ -64,7 +62,7 @@
     renderNotifications(window._notifs || []);
   };
   function loadNotifications() {
-    fetch('api/announcements.php')
+    fetch('api/announcements')
       .then(r => r.json())
       .then(d => { window._notifs = (d.announcements || []); renderNotifications(window._notifs); updateBellDot(); })
       .catch(() => {});

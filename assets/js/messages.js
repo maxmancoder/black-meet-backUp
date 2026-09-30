@@ -37,7 +37,7 @@
   }
 
   function loadConvs() {
-    fetch('api/pv_manager.php')
+    fetch('api/messages/conversations')
       .then(r => r.json())
       .then(d => {
         if (!d.ok) return;
@@ -124,7 +124,7 @@
     view = { type: 'user', user_id: Number(c.user_id), name: c.display_name, username: c.username, avatar: c.avatar, email: c.email };
     setHeader(view);
     refreshHeaderStatus();
-    fetch('api/pv_manager.php?user_id=' + c.user_id)
+    fetch('api/messages/conversations?user_id=' + c.user_id)
       .then(r => r.json())
       .then(d => { if (d.ok) renderChat(d.messages, 'user'); loadConvs(); })
       .catch(() => {});
@@ -133,7 +133,7 @@
   function openPublic() {
     view = { type: 'public' };
     setHeader(view);
-    fetch('api/announcements.php')
+    fetch('api/announcements')
       .then(r => r.json())
       .then(d => { if (d.ok) renderChat((d.announcements || []).map(a => ({ id: a.id, body: a.body, from_manager: 1 })), 'public'); })
       .catch(() => {});
@@ -146,7 +146,7 @@
       if (view && view.type === 'user' && Number(m.fromUserId) === view.user_id) {
         appendMessage({ id: m.id, body: m.body, from_manager: 0 }, false);
         // mark seen server-side (manager console opens the thread)
-        fetch('api/pv_manager.php?user_id=' + view.user_id, { method: 'GET' });
+        fetch('api/messages/conversations?user_id=' + view.user_id, { method: 'GET' });
         updateConvRow(view.user_id, { unread: 0 });
       } else if (view && view.type === 'user' && view.user_id === Number(m.fromUserId)) {
         // echo of my own send handled via PV_ACK — ignore duplicates
@@ -189,7 +189,7 @@
     const body = inp.value.trim();
     if (!body) return;
     if (view.type === 'public') {
-      fetch('api/announcements.php', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: CSRF, body }) })
+      fetch('api/announcements', { method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams({ csrf: CSRF, body }) })
         .then(r => r.json()).then(d => {
           if (!d.ok) return showToast(d.msg || 'خطا');
           inp.value = '';
@@ -200,7 +200,7 @@
     }
     // realtime PV send with client id (idempotent) + pending UI
     const clientMsgId = 'c' + Date.now() + '-' + Math.random().toString(36).slice(2, 10);
-    appendMessage({ id: null, body, from_manager: 0 }, false);
+    appendMessage({ id: null, body, from_manager: 1 }, true);
     inp.value = '';
     const s = window.BMLive && BMLive.socket();
     if (!s || !s.connected) { showToast('اتصال زنده قطع است — بعداً دوباره تلاش کنید'); return; }

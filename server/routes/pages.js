@@ -34,22 +34,31 @@ function requireManager(req, res) {
   if (!requireLogin(req, res)) return false;
   const me = sessions.currentUser(req);
   if (!me.is_manager) {
-    res.redirect(baseUrl(req) + '/home.php');
+    res.redirect(baseUrl(req) + '/home');
     return false;
   }
   return true;
 }
 
+// old .php names -> clean Node routes (308 keeps method + query string)
+function aliasPhp(oldPath, newPath) {
+  router.get(oldPath, (req, res) => {
+    const qi = req.url.indexOf('?');
+    const q = qi >= 0 ? req.url.slice(qi) : '';
+    res.redirect(308, baseUrl(req) + newPath + q);
+  });
+}
+
 const router = express.Router();
 
-router.get(['/', '/index.php'], (req, res) => {
+router.get(['/', '/login'], (req, res) => {
   if (sessions.currentUser(req) !== null) {
-    return res.redirect(baseUrl(req) + '/home.php');
+    return res.redirect(baseUrl(req) + '/home');
   }
   res.render('index', pageLocals(req, res, { title: 'ورود / ثبت‌نام - Black Meet' }));
 });
 
-router.get('/home.php', (req, res) => {
+router.get('/home', (req, res) => {
   if (!requireLogin(req, res)) return;
   const me = sessions.currentUser(req);
   const limited = !!me.is_limited;
@@ -72,7 +81,7 @@ router.get('/home.php', (req, res) => {
   }));
 });
 
-router.get('/create.php', (req, res) => {
+router.get('/create', (req, res) => {
   if (!requireLogin(req, res)) return;
   const me = sessions.currentUser(req);
   res.render('create', pageLocals(req, res, {
@@ -81,7 +90,7 @@ router.get('/create.php', (req, res) => {
   }));
 });
 
-router.get('/profile.php', (req, res) => {
+router.get('/profile', (req, res) => {
   if (!requireLogin(req, res)) return;
   const me = sessions.currentUser(req);
   res.render('profile', pageLocals(req, res, {
@@ -91,16 +100,16 @@ router.get('/profile.php', (req, res) => {
   }));
 });
 
-router.get('/forgot_password.php', (req, res) => {
+router.get('/forgot-password', (req, res) => {
   res.render('forgot_password', pageLocals(req, res, { title: 'بازیابی رمز عبور - Black Meet' }));
 });
 
-router.get('/messages.php', (req, res) => {
+router.get('/messages', (req, res) => {
   if (!requireManager(req, res)) return;
   res.render('messages', pageLocals(req, res, { title: 'پیام‌ها - Black Meet' }));
 });
 
-router.get('/admin_members.php', (req, res) => {
+router.get('/members', (req, res) => {
   if (!requireManager(req, res)) return;
   const me = sessions.currentUser(req);
   const users = dbm.all(
@@ -113,18 +122,18 @@ router.get('/admin_members.php', (req, res) => {
   }));
 });
 
-router.get('/call.php', (req, res) => {
+router.get('/meeting', (req, res) => {
   if (!requireLogin(req, res)) return;
   const room = String(req.query.room || '').trim();
-  if (room === '') return res.redirect(baseUrl(req) + '/home.php');
+  if (room === '') return res.redirect(baseUrl(req) + '/home');
 
   const meeting = dbm.get('SELECT * FROM meetings WHERE room_id=? AND active=1', [room]);
-  if (!meeting) return res.redirect(baseUrl(req) + '/home.php?err=nomeeting');
+  if (!meeting) return res.redirect(baseUrl(req) + '/home?err=nomeeting');
 
   const me = sessions.currentUser(req);
 
   const blocked = dbm.get('SELECT 1 AS b FROM meeting_blocks WHERE meeting_id=? AND user_id=?', [meeting.id, me.id]);
-  if (blocked) return res.redirect(baseUrl(req) + '/home.php?err=blocked');
+  if (blocked) return res.redirect(baseUrl(req) + '/home?err=blocked');
 
   let part = dbm.get('SELECT * FROM meeting_participants WHERE meeting_id=? AND user_id=?', [meeting.id, me.id]);
   if (!part) {
@@ -141,7 +150,10 @@ router.get('/call.php', (req, res) => {
   const myStatus = part.status;
 
   const participants = dbm.all(
-    'SELECT id, user_id, display_name, username, status, role, muted, cam_on, sharing FROM meeting_participants WHERE meeting_id=? AND status<>? ORDER BY id',
+    `SELECT p.id, p.user_id, p.display_name, p.username, p.status, p.role, p.muted, p.cam_on, p.sharing,
+            u.avatar_color, u.avatar, u.full_name, u.email, u.phone, u.is_manager
+     FROM meeting_participants p LEFT JOIN users u ON u.id = p.user_id
+     WHERE p.meeting_id=? AND p.status<>? ORDER BY p.id`,
     [meeting.id, 'removed']
   );
 
@@ -156,7 +168,7 @@ router.get('/call.php', (req, res) => {
   );
 
   const init = {
-    meeting: { id: Number(meeting.id), room: meeting.room_id, title: meeting.title },
+    meeting: { id: Number(meeting.id), room: meeting.room_id, title: meeting.title, default_media: Number(meeting.default_media) !== 0 },
     me: {
       id: Number(me.id), name: me.display_name, username: me.username,
       avatar_color: me.avatar_color, avatar: String(me.avatar || ''), is_admin: isAdmin, status: myStatus,
@@ -169,7 +181,7 @@ router.get('/call.php', (req, res) => {
     messages,
     emojis,
     csrf: sessions.csrfToken(req, res),
-    publicUrl: publicUrl(req) + '/call.php?room=' + meeting.room_id,
+    publicUrl: publicUrl(req) + '/meeting?room=' + meeting.room_id,
   };
 
   res.render('call', pageLocals(req, res, {
@@ -187,5 +199,15 @@ router.get('/call.php', (req, res) => {
 function now64() {
   return require('./../lib/helpers').sqlNow();
 }
+
+// compatibility: old .php URLs redirect to their clean Node equivalents
+aliasPhp('/index.php', '/login');
+aliasPhp('/home.php', '/home');
+aliasPhp('/create.php', '/create');
+aliasPhp('/profile.php', '/profile');
+aliasPhp('/forgot_password.php', '/forgot-password');
+aliasPhp('/messages.php', '/messages');
+aliasPhp('/admin_members.php', '/members');
+aliasPhp('/call.php', '/meeting');
 
 module.exports = router;

@@ -73,6 +73,21 @@ echo       Waiting for services to start...
 echo  ==========================================
 timeout /t 8 /nobreak >nul
 
+REM Wait (up to ~90s) for the public tunnel URL so Chrome can be opened
+REM by keep-tunnel-chain.ps1 before we print the summary.
+echo  Waiting for public tunnel URL...
+set /a TUNK=0
+:waittunnel
+if exist C:\xampp\htdocs\black-meet\tunnel_url.txt (
+    set /p TURL=<C:\xampp\htdocs\black-meet\tunnel_url.txt
+    if not "%TURL%"=="" goto tunnelready
+)
+set /a TUNK+=1
+if %TUNK% GEQ 18 goto tunnelready
+timeout /t 5 /nobreak >nul
+goto waittunnel
+:tunnelready
+
 echo.
 echo  ==========================================
 echo              SERVICE STATUS
@@ -91,14 +106,28 @@ REM Check TCP proxy
 netstat -an | findstr ":3478" | findstr "TCP" | findstr "LISTEN" >nul 2>&1
 if %errorlevel%==0 (echo  [OK] TCP proxy    TCP:3478) else (echo  [OFF] TCP proxy   TCP:3478)
 
-REM Check Website Tunnel
-tasklist | findstr /I "ssh.exe cloudflared.exe bore.exe" >nul 2>&1
-if %errorlevel%==0 (echo  [OK] Website Tunnel active) else (echo  [OFF] Website Tunnel DOWN)
+REM Website Tunnel: prefer the public URL from tunnel_url.txt
+set SITEURL=http://localhost:3000/black-meet/
+if "%TURL%"=="" (
+    echo  [..] Website Tunnel still building - retrying in background
+) else (
+    echo  [OK] Website Tunnel active: %TURL%
+    set SITEURL=%TURL%
+)
 
 echo.
-if exist C:\xampp\htdocs\black-meet\tunnel_url.txt (
-    set /p URL=<C:\xampp\htdocs\black-meet\tunnel_url.txt
-    echo  Website: %URL%
+echo  Website: %SITEURL%
+
+REM Try to find Chrome and open the site (public URL if available, local otherwise)
+set CHROME=%ProgramFiles%\Google\Chrome\Application\chrome.exe
+if not exist "%CHROME%" set "CHROME=%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"
+if not exist "%CHROME%" set "CHROME=%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"
+if exist "%CHROME%" (
+    start "" "%CHROME%" "%SITEURL%"
+    echo  Chrome: opened %SITEURL%
+) else (
+    start "" chrome "%SITEURL%"
+    echo  Chrome: opening site...
 )
 if exist C:\xampp\htdocs\black-meet\turn_host.txt (
     set /p TH=<C:\xampp\htdocs\black-meet\turn_host.txt

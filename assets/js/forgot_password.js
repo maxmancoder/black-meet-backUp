@@ -17,7 +17,7 @@
     const id = document.getElementById('identifier').value.trim();
     if (!id) return showToast('شماره تلفن یا ایمیل را وارد کنید');
     currentId = id;
-    fetch('api/pv_user.php?identifier=' + encodeURIComponent(id))
+    fetch('api/messages/user?identifier=' + encodeURIComponent(id))
       .then(r => r.json())
       .then(d => {
         if (!d.ok) return showToast(d.msg || 'خطا');
@@ -48,7 +48,7 @@
   // Live update: show manager replies without refresh
   function pollUserThread() {
     if (!currentId || document.getElementById('thread-box').classList.contains('hidden')) return;
-    fetch('api/pv_user.php?identifier=' + encodeURIComponent(currentId))
+    fetch('api/messages/user?identifier=' + encodeURIComponent(currentId))
       .then(r => r.json())
       .then(d => {
         if (!d.ok) return;
@@ -64,7 +64,7 @@
     const inp = document.getElementById('pv-input');
     const body = inp.value.trim();
     if (!body || !currentId) return;
-    fetch('api/pv_user.php', {
+    fetch('api/messages/user', {
       method: 'POST', headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({ csrf: window.CSRF, identifier: currentId, body })
     })
@@ -72,7 +72,7 @@
       .then(d => {
         if (!d.ok) return showToast(d.msg || 'خطا');
         inp.value = '';
-        return fetch('api/pv_user.php?identifier=' + encodeURIComponent(currentId)).then(r => r.json());
+        return fetch('api/messages/user?identifier=' + encodeURIComponent(currentId)).then(r => r.json());
       })
       .then(d => { if (d && d.ok) render(d.messages || []); })
       .catch(() => showToast('خطای ارتباط'));

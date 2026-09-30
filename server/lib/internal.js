@@ -1,5 +1,5 @@
 'use strict';
-// Single business-logic path for realtime actions (port of api/internal.php).
+// Single business-logic path for realtime actions (formerly ported from an old internal.php endpoint).
 // Sockets call these directly; no HTTP hop needed in the merged process.
 const dbm = require('./db');
 const { sqlNow } = require('./helpers');

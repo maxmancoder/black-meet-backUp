@@ -5,7 +5,7 @@
 <div class="fixed inset-0 z-0 opacity-20 pointer-events-none" style="background-image:linear-gradient(135deg,#0b1020 0%,#1e1b4b 55%,#0b1020 100%);background-size:cover;background-position:center;"></div>
 
 <header class="relative z-10 bg-background/80 backdrop-blur-md flex items-center justify-between px-lg py-md border-b border-outline-variant/20">
-    <a href="<%- url('home.php') %>" class="flex items-center gap-3">
+    <a href="<%- url('home') %>" class="flex items-center gap-3">
         <span class="material-symbols-outlined text-on-surface-variant">arrow_forward</span>
         <span class="font-display-md text-display-md font-bold text-primary">Black Meet</span>
     </a>
@@ -13,7 +13,7 @@
 </header>
 
 <main class="relative z-10 flex-1 p-grid-margin">
-    <div class="glass-panel rounded-2xl shadow-2xl p-xl w-full max-w-6xl mx-auto">
+    <div class="glass-panel rounded-2xl shadow-2xl p-lg sm:p-xl w-full">
         <div class="flex items-center gap-3 mb-md">
             <span class="material-symbols-outlined text-[36px] text-primary" style="font-variation-settings:'FILL' 1;">group_off</span>
             <div>
@@ -39,27 +39,32 @@
         </div>
         <p id="result-count" class="font-body-sm text-on-surface-variant mb-md"></p>
 
-        <div class="overflow-x-auto custom-scrollbar rounded-xl border border-outline-variant/20">
-            <table class="w-full text-right border-collapse">
-                <thead>
-                    <tr class="bg-surface-container-low text-on-surface-variant font-label-md">
-                        <th class="p-3 whitespace-nowrap">کاربر</th>
-                        <th class="p-3 whitespace-nowrap">نام کاربری</th>
-                        <th class="p-3 whitespace-nowrap">نام نمایشی</th>
-                        <th class="p-3 whitespace-nowrap">ایمیل</th>
-                        <th class="p-3 whitespace-nowrap">رمز عبور</th>
-                        <th class="p-3 whitespace-nowrap">تلفن</th>
-                        <th class="p-3 whitespace-nowrap">نقش</th>
-                        <th class="p-3 whitespace-nowrap">وضعیت</th>
-                        <th class="p-3 whitespace-nowrap">عملیات</th>
-                    </tr>
-                </thead>
-                <tbody id="user-tbody"></tbody>
-            </table>
-        </div>
+        <div id="user-cards" class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4 items-start"></div>
         <p class="font-body-sm text-on-surface-variant mt-md">رمز مدیر به‌صورت هش (غیرقابل بازگشت) ذخیره و مخفی است؛ رمز سایر کاربران به‌صورت متن ساده نمایش داده می‌شود. برای تغییر رمز هر کاربر از دکمه «تغییر رمز» استفاده کنید.</p>
     </div>
 </main>
+
+<!-- Password reset modal -->
+<div id="pwd-modal" class="hidden fixed inset-0 z-[80] flex items-center justify-center bg-background/70 backdrop-blur-sm p-4">
+    <div class="glass-panel rounded-2xl p-xl w-full max-w-[400px] relative">
+        <div class="flex items-center gap-3 mb-lg">
+            <span class="material-symbols-outlined text-[32px] text-primary" style="font-variation-settings:'FILL' 1;">key</span>
+            <div>
+                <h2 class="font-headline-md text-headline-md text-on-surface">تغییر رمز عبور</h2>
+                <p id="pwd-target" class="font-body-sm text-body-sm text-on-surface-variant"></p>
+            </div>
+        </div>
+        <label class="font-label-sm text-on-surface-variant block mb-2">رمز عبور جدید</label>
+        <div class="input-glow rounded-lg bg-surface-container-low border border-outline-variant transition-all flex items-center">
+            <input id="pwd-input" class="w-full bg-transparent border-none focus:ring-0 text-body-md text-on-surface px-4 py-3 outline-none" type="text" placeholder="خالی بگذارید تا به‌صورت خودکار تولید شود" maxlength="128" autocomplete="new-password"/>
+        </div>
+        <p class="font-label-sm text-on-surface-variant text-[11px] mt-2">در صورت خالی ماندن، رمز جدید به‌صورت خودکار تولید و نمایش داده می‌شود.</p>
+        <div class="flex gap-3 mt-lg">
+            <button onclick="submitPasswordReset()" class="flex-1 bg-primary text-white rounded-lg py-3 font-label-md hover:bg-primary-fixed transition-colors bm-soft">تایید</button>
+            <button onclick="closePwdModal()" class="flex-1 bg-surface-container-high text-on-surface rounded-lg py-3 font-label-md hover:opacity-80 transition-opacity bm-soft">انصراف</button>
+        </div>
+    </div>
+</div>
 
 <div class="fixed bottom-6 right-6 hidden z-50" id="toast"><div class="bg-error-container text-on-error-container px-6 py-3 rounded-lg shadow-xl flex items-center gap-3">
     <span class="material-symbols-outlined">error</span><span id="toast-message"></span></div></div>

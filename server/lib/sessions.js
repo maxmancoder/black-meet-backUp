@@ -131,7 +131,7 @@ function invalidate(req, res) {
 
 function requireLogin(req, res, base) {
   if (currentUser(req) === null) {
-    res.redirect(base + '/index.php');
+    res.redirect(base + '/login');
     return false;
   }
   return true;
